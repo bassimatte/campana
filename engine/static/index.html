@@ -115,21 +115,24 @@
     /* ── Inner padding ── */
     .inner { padding: 16px 20px 20px; }
 
-    /* ── Preset scroll ── */
-    .preset-scroll {
-      display: flex; gap: 7px; overflow-x: auto;
-      padding-bottom: 16px; scrollbar-width: none;
+    /* ── Preset grid ── */
+    .preset-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      padding-bottom: 16px;
     }
-    .preset-scroll::-webkit-scrollbar { display: none; }
     .pill {
-      flex-shrink: 0; padding: 6px 14px; border-radius: 100px;
+      padding: 7px 4px; border-radius: 8px;
       border: 1.5px solid var(--card-border);
       background: transparent; font-family: inherit;
-      font-size: 12px; font-weight: 500; color: var(--muted);
-      cursor: pointer; white-space: nowrap; transition: all 0.15s;
+      font-size: 11px; font-weight: 500; color: var(--muted);
+      cursor: pointer; text-align: center;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      transition: all 0.15s;
     }
     .pill:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
-    .pill.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+    .pill.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); font-weight: 600; }
 
     /* ── Tabs ── */
     .tabs {
@@ -217,8 +220,69 @@
     select:focus { outline: none; border-color: var(--accent); }
     .sfield.full { grid-column: 1 / -1; }
 
+    /* ── Info button ── */
+    .info-btn {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 1.5px solid var(--card-border);
+      background: var(--seg-bg); cursor: pointer; font-size: 13px;
+      display: grid; place-items: center; color: var(--muted);
+      font-family: inherit; font-weight: 600; transition: all 0.2s;
+    }
+    .info-btn:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
+
+    /* ── Info modal ── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; z-index: 999;
+      background: rgba(0,0,0,0.45); backdrop-filter: blur(4px);
+      align-items: center; justify-content: center; padding: 24px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal {
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: 20px; box-shadow: var(--shadow);
+      width: min(100%, 420px); max-height: 80vh;
+      overflow-y: auto; display: flex; flex-direction: column;
+    }
+    .modal-hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 20px 22px 16px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .modal-title {
+      font-size: 13px; font-weight: 700; letter-spacing: 0.18em;
+      text-transform: uppercase; color: var(--accent);
+    }
+    .modal-close {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 1.5px solid var(--card-border); background: var(--seg-bg);
+      cursor: pointer; font-size: 15px; display: grid; place-items: center;
+      color: var(--muted); line-height: 1; transition: all 0.15s;
+    }
+    .modal-close:hover { color: var(--text); background: var(--subtle); }
+    .modal-body { padding: 20px 22px; flex: 1; }
+    .modal-body p  { font-size: 13px; line-height: 1.7; color: var(--text); margin-bottom: 14px; }
+    .modal-body p:last-child { margin-bottom: 0; }
+    .modal-body h3 {
+      font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--muted); margin: 20px 0 8px;
+    }
+    .modal-body h3:first-child { margin-top: 0; }
+    .modal-body ul {
+      padding-left: 18px; font-size: 13px; line-height: 1.8;
+      color: var(--text);
+    }
+    .modal-body ul li { margin-bottom: 2px; }
+    .modal-foot {
+      padding: 14px 22px 18px;
+      border-top: 1px solid var(--card-border);
+      text-align: center;
+      font-size: 11px; color: var(--muted); letter-spacing: 0.04em;
+    }
+    .modal-foot strong { color: var(--accent); font-weight: 600; }
+
     /* ── Spacer between sections ── */
     .spacer { height: 16px; }
+
 
     /* ── Transport ── */
     .transport {
@@ -254,7 +318,10 @@
 
   <!-- Header -->
   <div class="hdr">
-    <span class="app-name">Campana</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="info-btn" onclick="openInfo()" title="About Campana">ⓘ</button>
+      <span class="app-name">Campana</span>
+    </div>
     <div class="hdr-right">
       <span class="status-dot" id="statusDot"></span>
       <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
@@ -270,7 +337,7 @@
   <div class="inner">
 
     <!-- Presets -->
-    <div class="preset-scroll" id="presetScroll">
+    <div class="preset-grid" id="presetScroll">
       <button class="pill active" id="pill-meditation"    onclick="selectPreset('meditation')">Meditazione</button>
       <button class="pill"        id="pill-evening_bells" onclick="selectPreset('evening_bells')">Sera</button>
       <button class="pill"        id="pill-tempio"        onclick="selectPreset('tempio')">Tempio</button>
@@ -433,6 +500,42 @@
 
 </div><!-- /shell -->
 
+<!-- Info modal -->
+<div class="modal-overlay" id="infoModal" onclick="closeInfoOnBg(event)">
+  <div class="modal">
+    <div class="modal-hdr">
+      <span class="modal-title">Campana</span>
+      <button class="modal-close" onclick="closeInfo()">✕</button>
+    </div>
+    <div class="modal-body">
+      <h3>What is Campana?</h3>
+      <p>Campana is a generative bell synthesizer that creates endlessly evolving, looping bell soundscapes directly in your browser. Each preset is a living composition — never exactly the same twice.</p>
+
+      <h3>Sound Engine</h3>
+      <p>Every bell tone is built from scratch using <strong>additive synthesis</strong>: a set of inharmonic partial frequencies characteristic of real bells are summed and shaped with individual amplitude envelopes. Four textures model different bell families:</p>
+      <ul>
+        <li><strong>Tubular</strong> — steel tube bells, bright attack</li>
+        <li><strong>Church</strong> — cast bronze, deep fundamental</li>
+        <li><strong>Bowl</strong> — Tibetan singing bowls, slowly beating partials</li>
+        <li><strong>Crystal</strong> — glass harmonics, high shimmer</li>
+      </ul>
+
+      <h3>Effects Chain</h3>
+      <ul>
+        <li><strong>Freeverb</strong> — algorithmic reverb (comb + allpass filters) for spatial depth</li>
+        <li><strong>Stereo delay</strong> — ping-pong echo with adjustable time and feedback</li>
+        <li><strong>Time scatter</strong> — detaches notes from the strict grid for a free, floating feel</li>
+        <li><strong>Humanize</strong> — micro-variations in timing and velocity</li>
+        <li><strong>Beating</strong> — slight detuning between partials, simulating the slow pulsations of real bells</li>
+      </ul>
+
+      <h3>Architecture</h3>
+      <p>Audio is rendered server-side in Python (NumPy + SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API plays chunks gaplessly using a double-buffer prefetch strategy.</p>
+    </div>
+    <div class="modal-foot">Produced by <strong>Matteo Bassi</strong></div>
+  </div>
+</div>
+
 <script>
 // ── Global error trap — shows JS errors in the status bar ──────────────────
 window.onerror = (msg, src, line) => {
@@ -444,6 +547,11 @@ window.onunhandledrejection = e => {
   const el = document.getElementById('tStatus');
   if (el) el.textContent = 'Async error: ' + (e.reason?.message || e.reason);
 };
+
+// ── Info modal ─────────────────────────────────────────────────────────────
+function openInfo()  { document.getElementById('infoModal').classList.add('open'); }
+function closeInfo() { document.getElementById('infoModal').classList.remove('open'); }
+function closeInfoOnBg(e) { if (e.target === e.currentTarget) closeInfo(); }
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 function toggleTheme() {
