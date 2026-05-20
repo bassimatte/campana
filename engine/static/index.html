@@ -300,6 +300,11 @@
     .btn-play:hover { transform: scale(1.06); box-shadow: 0 6px 22px var(--accent-mid); }
     .btn-play:active { transform: scale(0.95); }
     .btn-play.playing { background: var(--text); box-shadow: none; }
+    .btn-play.dirty   { background: var(--accent); box-shadow: 0 0 0 3px var(--accent-mid), 0 4px 18px var(--accent-mid); animation: dirty-pulse 1.8s ease-in-out infinite; }
+    @keyframes dirty-pulse {
+      0%, 100% { box-shadow: 0 0 0 2px var(--accent-mid), 0 4px 18px var(--accent-mid); }
+      50%       { box-shadow: 0 0 0 6px var(--accent-mid), 0 6px 24px var(--accent-mid); }
+    }
     .transport-info { flex: 1; min-width: 0; }
     .t-status { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .btn-export {
@@ -715,8 +720,35 @@ function setStatus(text, state = '') {
   dot.className = 'status-dot ' + state;
 }
 
-const svgPlay  = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><polygon points="6,3 18,10 6,17" fill="white"/></svg>`;
-const svgPause = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="4" width="4" height="12" rx="1.5" fill="white"/><rect x="11" y="4" width="4" height="12" rx="1.5" fill="white"/></svg>`;
+const svgPlay   = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><polygon points="6,3 18,10 6,17" fill="white"/></svg>`;
+const svgPause  = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="4" width="4" height="12" rx="1.5" fill="white"/><rect x="11" y="4" width="4" height="12" rx="1.5" fill="white"/></svg>`;
+const svgUpdate = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M3.5 10a6.5 6.5 0 1 0 1.3-3.9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><polyline points="3.5,5.5 3.5,10 8,10" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+let isDirty = false;
+
+function updatePlayBtn() {
+  const btn = $('playBtn');
+  btn.classList.remove('playing', 'dirty');
+  if (isPlaying && isDirty) {
+    btn.classList.add('dirty');
+    btn.innerHTML = svgUpdate;
+    btn.title = 'Apply changes';
+  } else if (isPlaying) {
+    btn.classList.add('playing');
+    btn.innerHTML = svgPause;
+    btn.title = 'Pause';
+  } else {
+    btn.innerHTML = svgPlay;
+    btn.title = 'Play';
+  }
+}
+
+function markDirty() {
+  if (isPlaying && !isDirty) {
+    isDirty = true;
+    updatePlayBtn();
+  }
+}
 
 // ── Audio engine ───────────────────────────────────────────────────────────
 
@@ -825,8 +857,7 @@ async function hardStop() {
     try { c.src.disconnect(); c.gain.disconnect(); } catch(_) {}
   }
   activeChunks.clear();
-  $('playBtn').classList.remove('playing');
-  $('playBtn').innerHTML = svgPlay;
+  isDirty = false; updatePlayBtn();
 }
 
 async function stopPlayback() {
@@ -844,12 +875,12 @@ async function stopPlayback() {
 
 async function startPlayback() {
   await ensureAudio();
-  const token = ++playToken; isPlaying = true; chunkIdx = 0;
+  const token = ++playToken; isPlaying = true; isDirty = false; chunkIdx = 0;
   const now = audioCtx.currentTime;
   masterGain.gain.cancelScheduledValues(now);
   masterGain.gain.setValueAtTime(0, now);
   masterGain.gain.linearRampToValueAtTime(parseFloat($('volume').value), now + PLAY_FADE);
-  $('playBtn').classList.add('playing'); $('playBtn').innerHTML = svgPause;
+  updatePlayBtn();
   setStatus('Generating first chunk…', 'loading');
   try {
     const buf = await fetchChunk(0, FIRST_BEATS);
@@ -865,8 +896,9 @@ async function startPlayback() {
 }
 
 async function togglePlay() {
-  if (isPlaying) await stopPlayback();
-  else           await startPlayback();
+  if (isPlaying && isDirty) { await stopPlayback(); await startPlayback(); }
+  else if (isPlaying)        { await stopPlayback(); }
+  else                       { await startPlayback(); }
 }
 
 // ── Export ─────────────────────────────────────────────────────────────────
@@ -940,10 +972,15 @@ function selectPreset(id) {
   _setSlider('delay_feedback', p.default_delay_feedback  ?? 0.35, () => upPct('delay_feedback','delayFbVal'));
   _setSlider('delay_wet',      p.default_delay_wet       ?? 0,    () => upPct('delay_wet','delayWetVal'));
   _setSlider('shimmer',        p.default_shimmer         ?? 0,    () => upPct('shimmer','shimmerVal'));
+  markDirty();
 }
 
 PRESETS_LIST.forEach(p => { presetDefs[p.id] = p; });
 selectPreset('meditation');
+
+// Mark dirty on any control change while playing
+document.querySelector('.inner').addEventListener('input',  markDirty);
+document.querySelector('.inner').addEventListener('change', markDirty);
 </script>
 </body>
 </html>
