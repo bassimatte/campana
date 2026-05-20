@@ -135,10 +135,17 @@ def index():
 
 @app.get("/api/presets")
 def list_presets():
+    keys = [
+        "name", "description", "default_bpm", "default_key",
+        "default_reverb", "default_decay", "default_texture",
+        "default_reverb_damping", "default_reverb_width", "default_reverb_wet",
+        "default_delay_time", "default_delay_feedback", "default_delay_wet",
+        "default_beating", "default_strike", "default_attack_ms",
+        "default_humanize", "default_density", "default_octave_spread",
+        "default_base_octave", "default_time_scatter",
+    ]
     return JSONResponse([
-        {"id": k, "name": v["name"], "description": v["description"],
-         "default_bpm": v["default_bpm"], "default_reverb": v["default_reverb"],
-         "default_decay": v["default_decay"]}
+        {"id": k, **{f: v[f] for f in keys if f in v}}
         for k, v in PRESETS.items()
     ])
 

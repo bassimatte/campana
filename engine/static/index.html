@@ -271,8 +271,13 @@
 
     <!-- Presets -->
     <div class="preset-scroll" id="presetScroll">
-      <button class="pill active" id="pill-meditation"    onclick="selectPreset('meditation')">Meditation</button>
-      <button class="pill"        id="pill-evening_bells" onclick="selectPreset('evening_bells')">Evening Bells</button>
+      <button class="pill active" id="pill-meditation"    onclick="selectPreset('meditation')">Meditazione</button>
+      <button class="pill"        id="pill-evening_bells" onclick="selectPreset('evening_bells')">Sera</button>
+      <button class="pill"        id="pill-tempio"        onclick="selectPreset('tempio')">Tempio</button>
+      <button class="pill"        id="pill-cristallo"     onclick="selectPreset('cristallo')">Cristallo</button>
+      <button class="pill"        id="pill-cattedrale"    onclick="selectPreset('cattedrale')">Cattedrale</button>
+      <button class="pill"        id="pill-deriva"        onclick="selectPreset('deriva')">Deriva</button>
+      <button class="pill"        id="pill-notte"         onclick="selectPreset('notte')">Notte</button>
     </div>
 
     <!-- Tabs -->
@@ -749,9 +754,19 @@ async function exportWav() {
 
 // ── Preset & key data (already in HTML; JS just needs the defaults) ─────────
 const PRESETS_LIST = [
-  { id:'meditation',    name:'Meditation',    default_bpm:50, default_reverb:0.75, default_decay:1.4 },
-  { id:'evening_bells', name:'Evening Bells', default_bpm:45, default_reverb:0.80, default_decay:1.6 },
+  { id:'meditation',   name:'Meditazione', default_bpm:50,  default_key:'C minor',  default_reverb:0.75, default_decay:1.4,  default_texture:'tubular', default_reverb_damping:0.4,  default_reverb_width:0.8,  default_reverb_wet:0.35, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_beating:0,    default_strike:0,   default_attack_ms:0, default_humanize:0,    default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'evening_bells',name:'Sera',        default_bpm:45,  default_key:'D minor',  default_reverb:0.82, default_decay:1.8,  default_texture:'church',  default_reverb_damping:0.55, default_reverb_width:0.9,  default_reverb_wet:0.45, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_beating:0,    default_strike:0.4, default_attack_ms:0, default_humanize:0.15, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'tempio',       name:'Tempio',      default_bpm:35,  default_key:'G minor',  default_reverb:0.88, default_decay:2.2,  default_texture:'bowl',    default_reverb_damping:0.6,  default_reverb_width:0.95, default_reverb_wet:0.55, default_delay_time:420, default_delay_feedback:0.4,  default_delay_wet:0,    default_beating:0.45, default_strike:0,   default_attack_ms:8, default_humanize:0.25, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'cristallo',    name:'Cristallo',   default_bpm:60,  default_key:'Bb minor', default_reverb:0.70, default_decay:1.2,  default_texture:'crystal', default_reverb_damping:0.25, default_reverb_width:0.95, default_reverb_wet:0.40, default_delay_time:275, default_delay_feedback:0.5,  default_delay_wet:0.25, default_beating:0.2,  default_strike:0,   default_attack_ms:5, default_humanize:0.3,  default_density:0.9,  default_octave_spread:1.0, default_base_octave:1,  default_time_scatter:0.15 },
+  { id:'cattedrale',   name:'Cattedrale',  default_bpm:30,  default_key:'D minor',  default_reverb:0.95, default_decay:2.3,  default_texture:'church',  default_reverb_damping:0.7,  default_reverb_width:0.95, default_reverb_wet:0.60, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_beating:0.1,  default_strike:0.6, default_attack_ms:0, default_humanize:0.1,  default_density:0.85, default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'deriva',       name:'Deriva',      default_bpm:50,  default_key:'Eb minor', default_reverb:0.78, default_decay:1.5,  default_texture:'crystal', default_reverb_damping:0.35, default_reverb_width:0.90, default_reverb_wet:0.42, default_delay_time:350, default_delay_feedback:0.55, default_delay_wet:0.28, default_beating:0.15, default_strike:0,   default_attack_ms:8, default_humanize:0.5,  default_density:0.85, default_octave_spread:1.5, default_base_octave:0,  default_time_scatter:0.65 },
+  { id:'notte',        name:'Notte',       default_bpm:40,  default_key:'F minor',  default_reverb:0.85, default_decay:1.9,  default_texture:'tubular', default_reverb_damping:0.5,  default_reverb_width:0.85, default_reverb_wet:0.48, default_delay_time:480, default_delay_feedback:0.42, default_delay_wet:0.18, default_beating:0.35, default_strike:0.2, default_attack_ms:0, default_humanize:0.1,  default_density:0.9,  default_octave_spread:0,   default_base_octave:-1, default_time_scatter:0    },
 ];
+
+function _setSlider(id, val, displayFn) {
+  const el = document.getElementById(id);
+  if (el) { el.value = val; if (displayFn) displayFn(); }
+}
 
 function selectPreset(id) {
   document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
@@ -760,11 +775,33 @@ function selectPreset(id) {
   selPreset = id;
   const p = presetDefs[id];
   if (!p) return;
+
+  // Rhythm
   $('bpmSelect').value = p.default_bpm;
-  $('reverb').value    = p.default_reverb;
-  $('roomVal').textContent = parseFloat(p.default_reverb).toFixed(2);
-  $('decay').value     = p.default_decay;
-  $('decayVal').textContent = parseFloat(p.default_decay).toFixed(1) + '\u00d7';
+  $('key').value       = p.default_key || 'C minor';
+  setOctave(p.default_base_octave ?? 0);
+  _setSlider('octave',       p.default_octave_spread ?? 0, () => upFx('octave','octaveVal','',1));
+  _setSlider('density',      p.default_density       ?? 1, () => upPct('density','densityVal'));
+  _setSlider('humanize',     p.default_humanize      ?? 0, () => upPct('humanize','humanizeVal'));
+  _setSlider('time_scatter', p.default_time_scatter  ?? 0, () => upPct('time_scatter','scatterVal'));
+
+  // Tone
+  setTexture(p.default_texture || 'tubular');
+  _setSlider('beating',     p.default_beating    ?? 0,   () => upPct('beating','beatingVal'));
+  _setSlider('strike_level',p.default_strike     ?? 0,   () => upPct('strike_level','strikeVal'));
+  _setSlider('attack_ms',   p.default_attack_ms  ?? 0,   () => upMs('attack_ms','attackVal'));
+  _setSlider('decay',       p.default_decay      ?? 1.4, () => upFx('decay','decayVal','×',1));
+
+  // Space — reverb
+  _setSlider('reverb',         p.default_reverb          ?? 0.5,  () => upFx('reverb','roomVal','',2));
+  _setSlider('reverb_damping', p.default_reverb_damping  ?? 0.4,  () => upPct('reverb_damping','dampingVal'));
+  _setSlider('reverb_width',   p.default_reverb_width    ?? 0.8,  () => upPct('reverb_width','widthVal'));
+  _setSlider('reverb_wet',     p.default_reverb_wet      ?? 0.35, () => upPct('reverb_wet','wetVal'));
+
+  // Space — delay
+  _setSlider('delay_time',     p.default_delay_time      ?? 300,  () => upMs('delay_time','delayTimeVal'));
+  _setSlider('delay_feedback', p.default_delay_feedback  ?? 0.35, () => upPct('delay_feedback','delayFbVal'));
+  _setSlider('delay_wet',      p.default_delay_wet       ?? 0,    () => upPct('delay_wet','delayWetVal'));
 }
 
 PRESETS_LIST.forEach(p => { presetDefs[p.id] = p; });
