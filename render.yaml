@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: campana
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/presets
+    envVars:
+      - key: PORT
+        value: 10000

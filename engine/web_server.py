@@ -14,6 +14,7 @@ from pathlib import Path
 
 try:
     from fastapi import FastAPI, Request
+    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
     import uvicorn
@@ -30,6 +31,17 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_DIR.mkdir(exist_ok=True)
 
 app = FastAPI(title="Bells Generator", version="1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://bassimatte.github.io",   # GitHub Pages
+        "http://localhost:8081",           # local dev
+        "http://127.0.0.1:8081",
+    ],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
