@@ -24,7 +24,7 @@ except ImportError:
     )
 
 from .synth import render_chunk, render_track, stereo_to_wav_bytes
-from .presets import PRESETS, KEYS
+from .presets import PRESETS, KEYS, SCALES
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_DIR.mkdir(exist_ok=True)
@@ -55,6 +55,8 @@ def _parse_render_params(body: dict) -> dict:
         delay_feedback   = float(body.get("delay_feedback", 0.35)),
         delay_wet        = float(body.get("delay_wet", 0.0)),
         time_scatter     = float(body.get("time_scatter", 0.0)),
+        shimmer          = float(body.get("shimmer", 0.0)),
+        scale_mode       = str(body.get("scale_mode", "minor")),
     )
 
 
@@ -90,6 +92,8 @@ def _do_preview(p: dict, chunk_index: int, chunk_beats: float) -> bytes:
         delay_feedback     = p["delay_feedback"],
         delay_wet          = p["delay_wet"],
         time_scatter       = p["time_scatter"],
+        shimmer            = p["shimmer"],
+        scale_mode         = p["scale_mode"],
     )
     return stereo_to_wav_bytes(audio)
 
@@ -120,6 +124,8 @@ def _do_full_render(p: dict) -> bytes:
         delay_feedback     = p.get("delay_feedback", 0.35),
         delay_wet          = p.get("delay_wet", 0.0),
         time_scatter       = p.get("time_scatter", 0.0),
+        shimmer            = p.get("shimmer", 0.0),
+        scale_mode         = p.get("scale_mode", "minor"),
     )
     return stereo_to_wav_bytes(audio)
 
@@ -136,18 +142,23 @@ def index():
 @app.get("/api/presets")
 def list_presets():
     keys = [
-        "name", "description", "default_bpm", "default_key",
+        "name", "description", "default_bpm", "default_key", "default_scale_mode",
         "default_reverb", "default_decay", "default_texture",
         "default_reverb_damping", "default_reverb_width", "default_reverb_wet",
         "default_delay_time", "default_delay_feedback", "default_delay_wet",
         "default_beating", "default_strike", "default_attack_ms",
         "default_humanize", "default_density", "default_octave_spread",
-        "default_base_octave", "default_time_scatter",
+        "default_base_octave", "default_time_scatter", "default_shimmer",
     ]
     return JSONResponse([
         {"id": k, **{f: v[f] for f in keys if f in v}}
         for k, v in PRESETS.items()
     ])
+
+
+@app.get("/api/scales")
+def list_scales():
+    return JSONResponse([{"id": k, "name": v} for k, v in SCALES.items()])
 
 
 @app.get("/api/keys")

@@ -74,6 +74,54 @@ def transpose_events(events: list, semitones: int) -> list:
     return [(t, transpose_note(n, semitones), d, v) for t, n, d, v in events]
 
 
+# ── Scale quantization ────────────────────────────────────────────────────────
+
+SCALES: dict = {
+    "minor":      [0, 2, 3, 5, 7, 8, 10],   # natural minor (default)
+    "major":      [0, 2, 4, 5, 7, 9, 11],
+    "dorian":     [0, 2, 3, 5, 7, 9, 10],
+    "pentatonic": [0, 3, 5, 7, 10],          # minor pentatonic
+    "whole_tone": [0, 2, 4, 6, 8, 10],
+}
+
+
+def _snap_midi_to_scale(midi: int, root_class: int, degrees: list) -> int:
+    """Return the MIDI note number closest to midi that lies in the scale."""
+    offset = (midi - root_class) % 12
+    best, best_dist = degrees[0], 12
+    for d in degrees:
+        dist = min(abs(d - offset), 12 - abs(d - offset))
+        if dist < best_dist:
+            best, best_dist = d, dist
+    delta = best - offset
+    if delta > 6:
+        delta -= 12
+    if delta < -6:
+        delta += 12
+    return midi + delta
+
+
+def apply_scale_quantize(events: list, root_semitone: int, scale: str) -> list:
+    """Snap all note pitches to the nearest degree of the given scale.
+    No-op when scale is 'minor' (presets are written in natural minor)."""
+    degrees = SCALES.get(scale)
+    if not degrees or scale == "minor":
+        return events
+    root_class = root_semitone % 12
+    result = []
+    for beat, note, dur, vel in events:
+        try:
+            octave  = int(note[-1])
+            n_name  = _NOTE_ALIASES.get(note[:-1], note[:-1])
+            midi    = (octave + 1) * 12 + _NOTE_NAMES.index(n_name)
+            new_mid = _snap_midi_to_scale(midi, root_class, degrees)
+            note    = _NOTE_NAMES[new_mid % 12] + str(new_mid // 12 - 1)
+        except Exception:
+            pass
+        result.append((beat, note, dur, vel))
+    return result
+
+
 # ── Bell tone ─────────────────────────────────────────────────────────────────
 
 def bell_tone(freq: float, duration: float, velocity: float = 1.0,
@@ -81,14 +129,19 @@ def bell_tone(freq: float, duration: float, velocity: float = 1.0,
               attack_ms: float = 0.0, beating: float = 0.0,
               strike_level: float = 0.0) -> np.ndarray:
     partials = BELL_TEXTURES.get(texture, BELL_TEXTURES["tubular"])
+    n_partials = len(partials)
     rng = np.random.default_rng(int(freq * 137) % (2**31))
     n   = int(SAMPLE_RATE * duration)
     t   = np.linspace(0, duration, n, endpoint=False)
     sig = np.zeros(n, dtype=np.float64)
-    for ratio, amp, tau in partials:
-        detuning = rng.uniform(-0.003, 0.003) * beating
+    for i, (ratio, amp, tau) in enumerate(partials):
+        # Velocity-dependent brightness: harder strikes excite higher partials more.
+        # At velocity 1.0 the highest partial gets a 70% boost; at 0.0 it drops 70%.
+        brightness = 1.0 + (velocity - 0.5) * 2.0 * (i / max(1, n_partials - 1)) * 0.7
+        eff_amp    = amp * max(0.02, brightness)
+        detuning   = rng.uniform(-0.003, 0.003) * beating
         env  = np.exp(-t / (tau * decay_mult))
-        sig += amp * np.sin(2 * np.pi * freq * ratio * (1.0 + detuning) * t) * env
+        sig += eff_amp * np.sin(2 * np.pi * freq * ratio * (1.0 + detuning) * t) * env
     # Soft-attack envelope
     if attack_ms > 0.0:
         ramp_n = min(int(attack_ms * SAMPLE_RATE / 1000), n)
@@ -186,12 +239,13 @@ def _fast_allpass(x: np.ndarray, delay_ms: float, gain: float = 0.5) -> np.ndarr
 
 
 def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
-             wet: float = 0.35, width: float = 0.8) -> np.ndarray:
+             wet: float = 0.35, width: float = 0.8, shimmer: float = 0.0) -> np.ndarray:
     """Freeverb: 8 damped-comb + 4 allpass, applied to stereo mix.
     room_size 0–1 → comb gain (decay time).
     damping   0–1 → high-freq absorption (post-comb 1-pole LP).
     wet       0–1 → dry/wet blend.
-    width     0–1 → stereo spread."""
+    width     0–1 → stereo spread.
+    shimmer   0–1 → blend in octave-up pitch-shifted reverb tail."""
     gain = 0.70 + room_size * 0.28          # room_size→comb feedback gain
     mono = (stereo[:, 0] + stereo[:, 1]) * 0.5
 
@@ -209,6 +263,20 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
 
     rev_l = _channel(0.0)
     rev_r = _channel(_FV_SPREAD_MS)
+
+    # Shimmer: add octave-up pitch-shifted version of the reverb wet signal.
+    # resample_poly(x, 1, 2) → half the sample count = one octave higher pitch.
+    # The shorter buffer is placed at t=0; it decays twice as fast as the base
+    # reverb, which is physically realistic (higher partials decay sooner).
+    if shimmer > 0.005:
+        n    = len(rev_l)
+        sh_l = sp_signal.resample_poly(rev_l, 1, 2)
+        sh_r = sp_signal.resample_poly(rev_r, 1, 2)
+        n_sh = min(len(sh_l), n)
+        buf_l = np.zeros(n); buf_l[:n_sh] = sh_l[:n_sh]
+        buf_r = np.zeros(n); buf_r[:n_sh] = sh_r[:n_sh]
+        rev_l = rev_l + buf_l * (shimmer * 0.45)
+        rev_r = rev_r + buf_r * (shimmer * 0.45)
 
     w2    = width / 2.0
     out_l = rev_l * (0.5 + w2) + rev_r * (0.5 - w2)
@@ -293,7 +361,8 @@ def render_track(events: list, total_beats: float,
                  attack_ms: float = 0.0, beating: float = 0.0,
                  strike_level: float = 0.0,
                  delay_time: float = 300.0, delay_feedback: float = 0.35,
-                 delay_wet: float = 0.0, time_scatter: float = 0.0) -> np.ndarray:
+                 delay_wet: float = 0.0, time_scatter: float = 0.0,
+                 shimmer: float = 0.0, scale_mode: str = "minor") -> np.ndarray:
     """Render events to a stereo float64 array with global Freeverb + Delay."""
     beat_dur     = 60.0 / bpm
     total_samp   = int(total_beats * beat_dur * SAMPLE_RATE) + SAMPLE_RATE * 6
@@ -301,6 +370,7 @@ def render_track(events: list, total_beats: float,
     rng          = np.random.default_rng(42)
 
     events = transpose_events(events, key_semitones + base_octave_shift * 12)
+    events = apply_scale_quantize(events, key_semitones, scale_mode)
     events = apply_octave_spread(events, octave_spread, seed=42)
 
     for beat, note, dur_beats, vel in events:
@@ -333,7 +403,7 @@ def render_track(events: list, total_beats: float,
         stereo[start:end, 1] += tone[:length] * r_g
 
     out = freeverb(stereo, room_size=reverb_room, damping=reverb_damping,
-                   wet=reverb_wet, width=reverb_width)
+                   wet=reverb_wet, width=reverb_width, shimmer=shimmer)
     return apply_delay(out, delay_ms=delay_time, feedback=delay_feedback, wet=delay_wet)
 
 
@@ -351,10 +421,10 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
                  attack_ms: float = 0.0, beating: float = 0.0,
                  strike_level: float = 0.0, seed: int = 42,
                  delay_time: float = 300.0, delay_feedback: float = 0.35,
-                 delay_wet: float = 0.0, time_scatter: float = 0.0) -> np.ndarray:
+                 delay_wet: float = 0.0, time_scatter: float = 0.0,
+                 shimmer: float = 0.0, scale_mode: str = "minor") -> np.ndarray:
     """Render chunk_beats starting at beat_offset with gapless lookahead, Freeverb + Delay."""
     beat_dur    = 60.0 / bpm
-    chunk_end   = beat_offset + chunk_beats
 
     window: list = []
     for b, n, d, v in events:
@@ -370,11 +440,14 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
     lookahead_evts = [(r, n, d, v) for r, n, d, v in window if r < 0]
     normal_evts    = [(r, n, d, v) for r, n, d, v in window if r >= 0]
 
-    normal_evts    = transpose_events(normal_evts, key_semitones + base_octave_shift * 12)
+    key_shift      = key_semitones + base_octave_shift * 12
+    normal_evts    = transpose_events(normal_evts, key_shift)
+    normal_evts    = apply_scale_quantize(normal_evts, key_semitones, scale_mode)
     loop_seed      = seed + int(beat_offset // total_beats) * 999
     normal_evts    = apply_octave_spread(normal_evts, octave_spread, seed=loop_seed)
 
-    lookahead_evts = transpose_events(lookahead_evts, key_semitones + base_octave_shift * 12)
+    lookahead_evts = transpose_events(lookahead_evts, key_shift)
+    lookahead_evts = apply_scale_quantize(lookahead_evts, key_semitones, scale_mode)
     prev_seed      = seed + max(0, int((beat_offset - 1) // total_beats)) * 999
     lookahead_evts = apply_octave_spread(lookahead_evts, octave_spread, seed=prev_seed)
 
@@ -382,7 +455,6 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
     total_samp  = int((chunk_beats * beat_dur + reverb_tail) * SAMPLE_RATE) + SAMPLE_RATE
     stereo      = np.zeros((total_samp, 2), dtype=np.float64)
     rng         = np.random.default_rng(seed + 300)
-    # Per-chunk scatter seed — reproducible per chunk but different across chunks
     scatter_rng = np.random.default_rng(abs(seed + int(beat_offset * 100)))
 
     for rel_beat, note, dur_beats, vel in lookahead_evts + normal_evts:
@@ -401,10 +473,9 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
                                beating=beating, strike_level=strike_level if is_normal else 0.0)
 
         if is_normal and time_scatter > 0:
-            # Interpolate between grid position and a random position within the chunk
-            grid_t  = rel_beat * beat_dur + jitter
-            rand_t  = scatter_rng.uniform(0.0, chunk_beats * beat_dur)
-            t       = grid_t * (1.0 - time_scatter) + rand_t * time_scatter
+            grid_t     = rel_beat * beat_dur + jitter
+            rand_t     = scatter_rng.uniform(0.0, chunk_beats * beat_dur)
+            t          = grid_t * (1.0 - time_scatter) + rand_t * time_scatter
             start_samp = max(0, int(t * SAMPLE_RATE))
         else:
             start_samp = int((rel_beat * beat_dur + jitter) * SAMPLE_RATE)
@@ -428,75 +499,8 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
             stereo[start_samp:end, 1] += tone[:length] * r_g
 
     out = freeverb(stereo, room_size=reverb_room, damping=reverb_damping,
-                   wet=reverb_wet, width=reverb_width)
+                   wet=reverb_wet, width=reverb_width, shimmer=shimmer)
     return apply_delay(out, delay_ms=delay_time, feedback=delay_feedback, wet=delay_wet)
-    """Render chunk_beats starting at beat_offset with gapless lookahead and global Freeverb."""
-    beat_dur    = 60.0 / bpm
-    chunk_end   = beat_offset + chunk_beats
-
-    window: list = []
-    for b, n, d, v in events:
-        loop_b     = b % total_beats
-        iterations = int(beat_offset // total_beats)
-        for iter_off in (0, -1, 1):
-            abs_b = loop_b + (iterations + iter_off) * total_beats
-            rel   = abs_b - beat_offset
-            if -_LOOKAHEAD_BEATS <= rel < chunk_beats:
-                window.append((rel, n, d, v))
-                break
-
-    lookahead_evts = [(r, n, d, v) for r, n, d, v in window if r < 0]
-    normal_evts    = [(r, n, d, v) for r, n, d, v in window if r >= 0]
-
-    normal_evts    = transpose_events(normal_evts, key_semitones + base_octave_shift * 12)
-    loop_seed      = seed + int(beat_offset // total_beats) * 999
-    normal_evts    = apply_octave_spread(normal_evts, octave_spread, seed=loop_seed)
-
-    lookahead_evts = transpose_events(lookahead_evts, key_semitones + base_octave_shift * 12)
-    prev_seed      = seed + max(0, int((beat_offset - 1) // total_beats)) * 999
-    lookahead_evts = apply_octave_spread(lookahead_evts, octave_spread, seed=prev_seed)
-
-    reverb_tail = 4.5 * max(decay_mult, 1.0)
-    total_samp  = int((chunk_beats * beat_dur + reverb_tail) * SAMPLE_RATE) + SAMPLE_RATE
-    stereo      = np.zeros((total_samp, 2), dtype=np.float64)
-    rng         = np.random.default_rng(seed + 300)
-
-    for rel_beat, note, dur_beats, vel in lookahead_evts + normal_evts:
-        is_normal = rel_beat >= 0
-        if is_normal and density < 1.0 and rng.random() > density:
-            continue
-        freq       = note_freq(note)
-        dur_s      = max(dur_beats * beat_dur, 0.05) + 3.0 * decay_mult
-        jitter     = rng.uniform(-0.025, 0.025) * humanize if is_normal else 0.0
-        vel_scaled = float(np.clip(
-            vel * (rng.uniform(1 - 0.25 * humanize, 1 + 0.1 * humanize) if is_normal else 1.0),
-            0.05, 1.0))
-        note_atk   = attack_ms * rng.uniform(0.5, 1.5) if (humanize > 0 and is_normal) else attack_ms
-        tone       = bell_tone(freq, dur_s, velocity=vel_scaled, decay_mult=decay_mult,
-                               texture=texture, attack_ms=note_atk,
-                               beating=beating, strike_level=strike_level if is_normal else 0.0)
-
-        start_samp = int((rel_beat * beat_dur + jitter) * SAMPLE_RATE)
-        if start_samp < 0:
-            skip = -start_samp
-            if skip >= len(tone):
-                continue
-            tone       = tone[skip:]
-            start_samp = 0
-
-        base_pan = np.clip((freq - 400) / 1200 * pan_spread, -0.5, 0.5)
-        pan      = float(base_pan + rng.uniform(-0.05, 0.05))
-        l_g      = np.sqrt(0.5 - pan * 0.5)
-        r_g      = np.sqrt(0.5 + pan * 0.5)
-
-        end    = min(start_samp + len(tone), total_samp)
-        length = end - start_samp
-        if length > 0:
-            stereo[start_samp:end, 0] += tone[:length] * l_g
-            stereo[start_samp:end, 1] += tone[:length] * r_g
-
-    return freeverb(stereo, room_size=reverb_room, damping=reverb_damping,
-                    wet=reverb_wet, width=reverb_width)
 
 
 def stereo_to_wav_bytes(audio: np.ndarray) -> bytes:
