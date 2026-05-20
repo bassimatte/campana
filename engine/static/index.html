@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Campana</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Tokens ─────────────────────────────────────────────────── */
+    :root, [data-theme="light"] {
+      --bg:          #edeae3;
+      --card:        #faf8f4;
+      --card-border: rgba(0,0,0,0.06);
+      --viz-bg:      linear-gradient(160deg,#f5f1e8 0%,#ece6d8 100%);
+      --text:        #1c1814;
+      --muted:       #8c8278;
+      --subtle:      #e4dfd6;
+      --accent:      #b8780a;
+      --accent-dim:  rgba(184,120,10,0.12);
+      --accent-mid:  rgba(184,120,10,0.25);
+      --shadow:      0 2px 1px rgba(0,0,0,0.04), 0 8px 32px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.06);
+      --seg-bg:      #e8e4db;
+      --seg-active:  #faf8f4;
+      --seg-shadow:  0 1px 4px rgba(0,0,0,0.12);
+      --tab-active:  var(--text);
+      --wave1:       rgba(184,120,10,0.55);
+      --wave2:       rgba(184,120,10,0.22);
+    }
+    [data-theme="dark"] {
+      --bg:          #0e0e0e;
+      --card:        #191714;
+      --card-border: rgba(255,255,255,0.07);
+      --viz-bg:      linear-gradient(160deg,#1c1810 0%,#141210 100%);
+      --text:        #f0ece4;
+      --muted:       #7a7060;
+      --subtle:      #2a2620;
+      --accent:      #d4a030;
+      --accent-dim:  rgba(212,160,48,0.13);
+      --accent-mid:  rgba(212,160,48,0.28);
+      --shadow:      0 2px 1px rgba(0,0,0,0.2), 0 8px 40px rgba(0,0,0,0.5);
+      --seg-bg:      #2a2620;
+      --seg-active:  #3a3428;
+      --seg-shadow:  0 1px 4px rgba(0,0,0,0.4);
+      --tab-active:  var(--text);
+      --wave1:       rgba(212,160,48,0.5);
+      --wave2:       rgba(212,160,48,0.18);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      min-height: 100vh;
+      display: grid;
+      place-items: start center;
+      padding: 40px 16px 80px;
+      transition: background 0.3s;
+    }
+
+    /* ── Shell ── */
+    .shell {
+      width: min(100%, 480px);
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      transition: background 0.3s, border-color 0.3s;
+    }
+
+    /* ── Header ── */
+    .hdr {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .app-name {
+      font-size: 13px; font-weight: 600; letter-spacing: 0.22em;
+      text-transform: uppercase; color: var(--accent);
+    }
+    .hdr-right { display: flex; align-items: center; gap: 8px; }
+    .status-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted); transition: background 0.3s;
+    }
+    .status-dot.playing { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .status-dot.loading { background: var(--accent); animation: pulse 0.9s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
+    .theme-btn {
+      width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--card-border);
+      background: var(--seg-bg); cursor: pointer; font-size: 13px;
+      display: grid; place-items: center; transition: transform 0.2s;
+    }
+    .theme-btn:hover { transform: scale(1.1); }
+
+    /* ── Viz ── */
+    .viz {
+      position: relative;
+      background: var(--viz-bg);
+      height: 88px;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .viz canvas { display: block; width: 100%; height: 100%; }
+    .viz-label {
+      position: absolute; bottom: 10px; left: 16px;
+      font-size: 11px; color: var(--muted); letter-spacing: 0.04em;
+      transition: color 0.3s;
+    }
+    .viz-label.playing { color: var(--accent); }
+    .viz-label.loading { color: var(--accent); }
+
+    /* ── Inner padding ── */
+    .inner { padding: 16px 20px 20px; }
+
+    /* ── Preset scroll ── */
+    .preset-scroll {
+      display: flex; gap: 7px; overflow-x: auto;
+      padding-bottom: 16px; scrollbar-width: none;
+    }
+    .preset-scroll::-webkit-scrollbar { display: none; }
+    .pill {
+      flex-shrink: 0; padding: 6px 14px; border-radius: 100px;
+      border: 1.5px solid var(--card-border);
+      background: transparent; font-family: inherit;
+      font-size: 12px; font-weight: 500; color: var(--muted);
+      cursor: pointer; white-space: nowrap; transition: all 0.15s;
+    }
+    .pill:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
+    .pill.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex; border-bottom: 1px solid var(--card-border);
+      margin: 0 -20px; padding: 0 20px;
+      gap: 0;
+    }
+    .tab {
+      flex: 1; padding: 9px 0; border: none; background: none;
+      font-family: inherit; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--muted); cursor: pointer;
+      border-bottom: 2px solid transparent; margin-bottom: -1px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    /* ── Tab panels ── */
+    .panel { display: none; padding-top: 16px; }
+    .panel.active { display: block; }
+
+    /* ── Field label ── */
+    .field-label {
+      display: block; font-size: 10px; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 8px;
+    }
+
+    /* ── Segmented control ── */
+    .seg {
+      display: flex; background: var(--seg-bg); border-radius: 8px;
+      padding: 3px; gap: 2px; margin-bottom: 16px;
+    }
+    .seg-btn {
+      flex: 1; padding: 6px 0; border: none; border-radius: 6px;
+      background: transparent; color: var(--muted);
+      font-family: inherit; font-size: 12px; font-weight: 500;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .seg-btn.active {
+      background: var(--seg-active); color: var(--accent);
+      box-shadow: var(--seg-shadow); font-weight: 600;
+    }
+
+    /* ── Slider grid ── */
+    .grid2 {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 18px 20px;
+    }
+    .sfield label {
+      display: flex; justify-content: space-between;
+      font-size: 10px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 8px;
+    }
+    .sfield label .val {
+      color: var(--accent); font-weight: 600;
+      font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0;
+    }
+    input[type=range] {
+      -webkit-appearance: none; width: 100%; height: 3px;
+      background: var(--subtle); border-radius: 2px; cursor: pointer; outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: var(--accent); border: 2px solid var(--card);
+      box-shadow: 0 1px 4px var(--accent-mid); transition: transform 0.12s;
+    }
+    input[type=range]:active::-webkit-slider-thumb { transform: scale(1.25); }
+    input[type=range]::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--accent); border: 2px solid var(--card);
+    }
+
+    /* ── Row ── */
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+    select {
+      width: 100%; padding: 8px 28px 8px 10px; border: 1.5px solid var(--card-border);
+      border-radius: 8px; background: var(--card); color: var(--text);
+      font-family: inherit; font-size: 13px; appearance: none; cursor: pointer;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='5'%3E%3Cpath d='M0 0l4.5 5 4.5-5z' fill='%23aaa'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 10px center;
+      transition: border-color 0.15s;
+    }
+    select:focus { outline: none; border-color: var(--accent); }
+    .sfield.full { grid-column: 1 / -1; }
+
+    /* ── Spacer between sections ── */
+    .spacer { height: 16px; }
+
+    /* ── Transport ── */
+    .transport {
+      border-top: 1px solid var(--card-border);
+      padding: 16px 20px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .btn-play {
+      width: 52px; height: 52px; border-radius: 50%; border: none;
+      background: var(--accent); cursor: pointer; flex-shrink: 0;
+      display: grid; place-items: center;
+      box-shadow: 0 4px 16px var(--accent-mid);
+      transition: transform 0.15s, box-shadow 0.15s, background 0.2s;
+    }
+    .btn-play:hover { transform: scale(1.06); box-shadow: 0 6px 22px var(--accent-mid); }
+    .btn-play:active { transform: scale(0.95); }
+    .btn-play.playing { background: var(--text); box-shadow: none; }
+    .transport-info { flex: 1; min-width: 0; }
+    .t-status { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .btn-export {
+      padding: 0 16px; height: 38px; border-radius: 100px;
+      border: 1.5px solid var(--card-border); background: transparent;
+      color: var(--muted); font-family: inherit; font-size: 12px; font-weight: 500;
+      cursor: pointer; display: flex; align-items: center; gap: 5px;
+      transition: all 0.15s; white-space: nowrap;
+    }
+    .btn-export:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
+    .btn-export:disabled { opacity: 0.38; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Header -->
+  <div class="hdr">
+    <span class="app-name">Campana</span>
+    <div class="hdr-right">
+      <span class="status-dot" id="statusDot"></span>
+      <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+    </div>
+  </div>
+
+  <!-- Viz -->
+  <div class="viz">
+    <canvas id="viz"></canvas>
+    <span class="viz-label" id="vizLabel">idle</span>
+  </div>
+
+  <div class="inner">
+
+    <!-- Presets -->
+    <div class="preset-scroll" id="presetScroll">
+      <button class="pill active" id="pill-meditation"    onclick="selectPreset('meditation')">Meditation</button>
+      <button class="pill"        id="pill-evening_bells" onclick="selectPreset('evening_bells')">Evening Bells</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" id="tab-tone"    onclick="setTab('tone')">Tone</button>
+      <button class="tab"        id="tab-space"   onclick="setTab('space')">Space</button>
+      <button class="tab"        id="tab-rhythm"  onclick="setTab('rhythm')">Rhythm</button>
+    </div>
+
+    <!-- Panel: Tone -->
+    <div class="panel active" id="panel-tone">
+      <span class="field-label">Bell Texture</span>
+      <div class="seg" id="textureSeg">
+        <button class="seg-btn active" data-val="tubular" onclick="setTexture('tubular')">Tubular</button>
+        <button class="seg-btn"        data-val="church"  onclick="setTexture('church')">Church</button>
+        <button class="seg-btn"        data-val="bowl"    onclick="setTexture('bowl')">Bowl</button>
+        <button class="seg-btn"        data-val="crystal" onclick="setTexture('crystal')">Crystal</button>
+      </div>
+      <div class="grid2">
+        <div class="sfield">
+          <label>Beating <span class="val" id="beatingVal">0%</span></label>
+          <input type="range" id="beating" min="0" max="1" step="0.05" value="0" oninput="upPct('beating','beatingVal')">
+        </div>
+        <div class="sfield">
+          <label>Strike <span class="val" id="strikeVal">0%</span></label>
+          <input type="range" id="strike_level" min="0" max="1" step="0.05" value="0" oninput="upPct('strike_level','strikeVal')">
+        </div>
+        <div class="sfield">
+          <label>Attack <span class="val" id="attackVal">0ms</span></label>
+          <input type="range" id="attack_ms" min="0" max="30" step="1" value="0" oninput="upMs('attack_ms','attackVal')">
+        </div>
+        <div class="sfield">
+          <label>Decay <span class="val" id="decayVal">1.4×</span></label>
+          <input type="range" id="decay" min="0.3" max="2.5" step="0.1" value="1.4" oninput="upFx('decay','decayVal','×',1)">
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel: Space (reverb + delay) -->
+    <div class="panel" id="panel-space">
+      <div class="grid2">
+        <div class="sfield">
+          <label>Room <span class="val" id="roomVal">0.50</span></label>
+          <input type="range" id="reverb" min="0" max="1" step="0.05" value="0.5" oninput="upFx('reverb','roomVal','',2)">
+        </div>
+        <div class="sfield">
+          <label>Damping <span class="val" id="dampingVal">40%</span></label>
+          <input type="range" id="reverb_damping" min="0" max="1" step="0.05" value="0.4" oninput="upPct('reverb_damping','dampingVal')">
+        </div>
+        <div class="sfield">
+          <label>Width <span class="val" id="widthVal">80%</span></label>
+          <input type="range" id="reverb_width" min="0" max="1" step="0.05" value="0.8" oninput="upPct('reverb_width','widthVal')">
+        </div>
+        <div class="sfield">
+          <label>Wet <span class="val" id="wetVal">35%</span></label>
+          <input type="range" id="reverb_wet" min="0" max="1" step="0.05" value="0.35" oninput="upPct('reverb_wet','wetVal')">
+        </div>
+      </div>
+      <div class="spacer"></div>
+      <span class="field-label">Delay</span>
+      <div class="grid2">
+        <div class="sfield">
+          <label>Time <span class="val" id="delayTimeVal">300ms</span></label>
+          <input type="range" id="delay_time" min="50" max="900" step="25" value="300" oninput="upMs('delay_time','delayTimeVal')">
+        </div>
+        <div class="sfield">
+          <label>Feedback <span class="val" id="delayFbVal">35%</span></label>
+          <input type="range" id="delay_feedback" min="0" max="0.85" step="0.05" value="0.35" oninput="upPct('delay_feedback','delayFbVal')">
+        </div>
+        <div class="sfield" style="grid-column:1/-1">
+          <label>Delay Mix <span class="val" id="delayWetVal">0%</span></label>
+          <input type="range" id="delay_wet" min="0" max="0.8" step="0.05" value="0" oninput="upPct('delay_wet','delayWetVal')">
+        </div>
+      </div>
+    </div>
+
+    <!-- Panel: Rhythm -->
+    <div class="panel" id="panel-rhythm">
+      <div class="row2">
+        <div>
+          <span class="field-label">Key</span>
+          <select id="key">
+            <option>C minor</option><option>D minor</option>
+            <option>Eb minor</option><option>E minor</option>
+            <option>F minor</option><option>G minor</option>
+            <option>A minor</option><option>Bb minor</option>
+          </select>
+        </div>
+        <div>
+          <span class="field-label">BPM</span>
+          <select id="bpmSelect">
+            <option value="30">30</option><option value="35">35</option>
+            <option value="40">40</option><option value="45" selected>45</option>
+            <option value="50">50</option><option value="55">55</option>
+            <option value="60">60</option><option value="65">65</option>
+            <option value="70">70</option><option value="72">72</option>
+            <option value="80">80</option><option value="90">90</option>
+          </select>
+        </div>
+      </div>
+      <span class="field-label">Base Octave</span>
+      <div class="seg" id="octaveSeg">
+        <button class="seg-btn" data-val="-2" onclick="setOctave(-2)">−2</button>
+        <button class="seg-btn" data-val="-1" onclick="setOctave(-1)">−1</button>
+        <button class="seg-btn active" data-val="0" onclick="setOctave(0)">0</button>
+        <button class="seg-btn" data-val="1" onclick="setOctave(1)">+1</button>
+        <button class="seg-btn" data-val="2" onclick="setOctave(2)">+2</button>
+      </div>
+      <div class="grid2">
+        <div class="sfield">
+          <label>Oct. Spread <span class="val" id="octaveVal">0.0</span></label>
+          <input type="range" id="octave" min="0" max="3" step="0.5" value="0" oninput="upFx('octave','octaveVal','',1)">
+        </div>
+        <div class="sfield">
+          <label>Density <span class="val" id="densityVal">100%</span></label>
+          <input type="range" id="density" min="0.1" max="1" step="0.05" value="1" oninput="upPct('density','densityVal')">
+        </div>
+        <div class="sfield">
+          <label>Humanize <span class="val" id="humanizeVal">0%</span></label>
+          <input type="range" id="humanize" min="0" max="1" step="0.05" value="0" oninput="upPct('humanize','humanizeVal')">
+        </div>
+        <div class="sfield">
+          <label>Time Scatter <span class="val" id="scatterVal">0%</span></label>
+          <input type="range" id="time_scatter" min="0" max="1" step="0.05" value="0" oninput="upPct('time_scatter','scatterVal')">
+        </div>
+        <div class="sfield">
+          <label>Volume <span class="val" id="volVal">80%</span></label>
+          <input type="range" id="volume" min="0" max="1" step="0.05" value="0.8" oninput="setVolume()">
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /inner -->
+
+  <!-- Transport -->
+  <div class="transport">
+    <button class="btn-play" id="playBtn" onclick="togglePlay()">
+      <svg id="playIcon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+        <polygon points="6,3 18,10 6,17" fill="white"/>
+      </svg>
+    </button>
+    <div class="transport-info">
+      <div class="t-status" id="tStatus">Ready</div>
+    </div>
+    <button class="btn-export" id="exportBtn" onclick="exportWav()">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+           stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <path d="M6 1v7M3 5l3 3 3-3M1 10v1h10v-1"/>
+      </svg>
+      Export
+    </button>
+  </div>
+
+</div><!-- /shell -->
+
+<script>
+// ── Global error trap — shows JS errors in the status bar ──────────────────
+window.onerror = (msg, src, line) => {
+  const el = document.getElementById('tStatus');
+  if (el) el.textContent = 'JS Error line ' + line + ': ' + msg;
+  return false;
+};
+window.onunhandledrejection = e => {
+  const el = document.getElementById('tStatus');
+  if (el) el.textContent = 'Async error: ' + (e.reason?.message || e.reason);
+};
+
+// ── Theme ──────────────────────────────────────────────────────────────────
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  document.getElementById('themeBtn').textContent = next === 'dark' ? '☀️' : '🌙';
+  localStorage.setItem('campana-theme', next);
+}
+(function(){
+  const t = localStorage.getItem('campana-theme') || 'light';
+  document.documentElement.setAttribute('data-theme', t);
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('themeBtn').textContent = t === 'dark' ? '☀️' : '🌙';
+  });
+})();
+
+// ── Tabs ───────────────────────────────────────────────────────────────────
+function setTab(name) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.id === 'tab-' + name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));
+}
+
+// ── Texture ────────────────────────────────────────────────────────────────
+let selTexture = 'tubular';
+function setTexture(v) {
+  selTexture = v;
+  document.querySelectorAll('#textureSeg .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.val === v));
+}
+
+// ── Octave ─────────────────────────────────────────────────────────────────
+let baseOctave = 0;
+function setOctave(v) {
+  baseOctave = v;
+  document.querySelectorAll('#octaveSeg .seg-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.val) === v));
+}
+
+// ── Value display ──────────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+function upPct(id, vid) { $(vid).textContent = Math.round(parseFloat($(id).value)*100)+'%'; }
+function upMs(id, vid)  { $(vid).textContent = parseInt($(id).value)+'ms'; }
+function upFx(id, vid, suf, dec) { $(vid).textContent = parseFloat($(id).value).toFixed(dec)+suf; }
+function setVolume() {
+  const v = parseFloat($('volume').value);
+  $('volVal').textContent = Math.round(v*100)+'%';
+  if (masterGain) masterGain.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
+}
+
+// ── Params ─────────────────────────────────────────────────────────────────
+function getParams() {
+  return {
+    preset:            selPreset,
+    bpm:               parseInt($('bpmSelect').value),
+    key:               $('key').value,
+    reverb_room:       parseFloat($('reverb').value),
+    reverb_damping:    parseFloat($('reverb_damping').value),
+    reverb_width:      parseFloat($('reverb_width').value),
+    reverb_wet:        parseFloat($('reverb_wet').value),
+    decay_mult:        parseFloat($('decay').value),
+    octave_spread:     parseFloat($('octave').value),
+    base_octave_shift: baseOctave,
+    humanize:          parseFloat($('humanize').value),
+    density:           parseFloat($('density').value),
+    texture:           selTexture,
+    attack_ms:         parseFloat($('attack_ms').value),
+    beating:           parseFloat($('beating').value),
+    strike_level:      parseFloat($('strike_level').value),
+    delay_time:        parseFloat($('delay_time').value),
+    delay_feedback:    parseFloat($('delay_feedback').value),
+    delay_wet:         parseFloat($('delay_wet').value),
+    time_scatter:      parseFloat($('time_scatter').value),
+  };
+}
+
+// ── Audio state — declared early so drawViz and all functions can access ────
+let audioCtx    = null;
+let masterGain  = null;
+let isPlaying   = false;
+let playToken   = 0;
+let activeChunks= new Set();
+let chunkIdx    = 0;
+let selPreset   = 'meditation';
+let presetDefs  = {};
+
+const FIRST_BEATS = 6;
+const CHUNK_BEATS = 12;
+const CROSSFADE   = 0.5;
+const PLAY_FADE   = 0.3;
+const STOP_FADE   = 0.5;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// ── Canvas waveform ────────────────────────────────────────────────────────
+const canvas = $('viz');
+const ctx2   = canvas.getContext('2d');
+let wPhase   = 0;
+
+function resizeCanvas() {
+  canvas.width  = canvas.offsetWidth  * (devicePixelRatio || 1);
+  canvas.height = canvas.offsetHeight * (devicePixelRatio || 1);
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
+function drawViz() {
+  const w = canvas.width, h = canvas.height, dpr = devicePixelRatio || 1;
+  ctx2.clearRect(0, 0, w, h);
+  const amp = isPlaying ? 0.32 : 0.04;
+  const spd = isPlaying ? 2.6 : 0.5;
+  const cs  = getComputedStyle(document.documentElement);
+  [
+    [cs.getPropertyValue('--wave1').trim(), 1.0],
+    [cs.getPropertyValue('--wave2').trim(), 0.6],
+  ].forEach(([color, aScale], i) => {
+    ctx2.beginPath();
+    ctx2.strokeStyle = color;
+    ctx2.lineWidth   = (1.4 - i * 0.3) * dpr;
+    for (let x = 0; x <= w; x += 2) {
+      const t = x / w;
+      const y = h/2 + Math.sin(t * Math.PI * (4 + i) * spd + wPhase * (i ? -0.8 : 1)) * amp * aScale * h;
+      x === 0 ? ctx2.moveTo(x, y) : ctx2.lineTo(x, y);
+    }
+    ctx2.stroke();
+  });
+  wPhase += isPlaying ? 0.04 : 0.005;
+  requestAnimationFrame(drawViz);
+}
+drawViz();
+
+// ── Status helpers ─────────────────────────────────────────────────────────
+function setStatus(text, state = '') {
+  $('tStatus').textContent  = text;
+  $('vizLabel').textContent = text;
+  $('vizLabel').className   = 'viz-label ' + state;
+  const dot = $('statusDot');
+  dot.className = 'status-dot ' + state;
+}
+
+const svgPlay  = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><polygon points="6,3 18,10 6,17" fill="white"/></svg>`;
+const svgPause = `<svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="4" y="4" width="4" height="12" rx="1.5" fill="white"/><rect x="11" y="4" width="4" height="12" rx="1.5" fill="white"/></svg>`;
+
+// ── Audio engine ───────────────────────────────────────────────────────────
+
+async function ensureAudio() {
+  if (!audioCtx) {
+    audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
+    masterGain = audioCtx.createGain();
+    masterGain.gain.value = parseFloat($('volume').value);
+    masterGain.connect(audioCtx.destination);
+  }
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+}
+
+async function fetchChunk(idx, beats) {
+  const resp = await fetch('/api/preview', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ ...getParams(), chunk_index: idx, chunk_beats: beats }),
+  });
+  if (!resp.ok) {
+    let detail = `Server error ${resp.status}`;
+    try { const j = await resp.json(); detail = j.detail || detail; } catch(_) {}
+    throw new Error(detail.split('\n')[0]); // first line of traceback
+  }
+  return audioCtx.decodeAudioData(await resp.arrayBuffer());
+}
+
+function scheduleChunk(buffer, startTime, token) {
+  const src  = audioCtx.createBufferSource();
+  const gain = audioCtx.createGain();
+  const fade = Math.min(CROSSFADE, buffer.duration * 0.1);
+  const end  = startTime + buffer.duration;
+  const s0   = Math.min(startTime + fade, end);
+  const s1   = Math.max(s0, end - fade);
+
+  src.buffer = buffer; src.connect(gain); gain.connect(masterGain);
+  gain.gain.setValueAtTime(0, startTime);
+  gain.gain.linearRampToValueAtTime(1, s0);
+  gain.gain.setValueAtTime(1, s1);
+  gain.gain.linearRampToValueAtTime(0, end);
+
+  const chunk = { src, gain, token };
+  activeChunks.add(chunk);
+  src.onended = () => {
+    activeChunks.delete(chunk);
+    try { src.disconnect(); gain.disconnect(); } catch(_) {}
+  };
+  src.start(startTime);
+  src.stop(end + 0.02);
+  return { endTime: end, fade };
+}
+
+// ── Streaming loop — Maresono double-prefetch strategy ────────────────────
+// Always keep TWO chunk requests in-flight simultaneously so rendering time
+// never causes a gap: while chunk N plays we have both N+1 and N+2 fetching.
+async function streamLoop(firstBuffer, token) {
+  let buffer    = firstBuffer;
+  let startTime = audioCtx.currentTime + 0.05;
+  chunkIdx++;
+
+  // Eagerly start fetching next chunk immediately
+  let nextPromise = fetchChunk(chunkIdx, CHUNK_BEATS);
+
+  while (isPlaying && token === playToken) {
+    const sched     = scheduleChunk(buffer, startTime, token);
+    const nextStart = Math.max(audioCtx.currentTime + 0.05, sched.endTime - sched.fade);
+
+    chunkIdx++;
+    // Immediately start fetching the chunk AFTER next (stay 2 ahead)
+    const afterPromise = fetchChunk(chunkIdx, CHUNK_BEATS);
+
+    // Await the already-in-flight next chunk
+    let nextBuffer = null;
+    try {
+      nextBuffer = await nextPromise;
+    } catch (e) {
+      if (!isPlaying || token !== playToken) break;
+      setStatus('Buffering…', 'loading');
+      try { nextBuffer = await fetchChunk(chunkIdx - 1, CHUNK_BEATS); } catch (_) {}
+      if (!nextBuffer) { await hardStop(); setStatus('Error rendering chunk', ''); break; }
+    }
+    if (!isPlaying || token !== playToken) break;
+
+    // Wait in small steps until just before the next chunk is needed
+    const waitUntil = nextStart - 0.08;
+    if (waitUntil > audioCtx.currentTime) {
+      const totalMs = (waitUntil - audioCtx.currentTime) * 1000;
+      const STEP    = 150;
+      let waited    = 0;
+      while (waited < totalMs && isPlaying && token === playToken) {
+        await sleep(Math.min(STEP, totalMs - waited));
+        waited += STEP;
+      }
+    }
+    if (!isPlaying || token !== playToken) break;
+
+    startTime   = Math.max(audioCtx.currentTime + 0.02, nextStart);
+    buffer      = nextBuffer;
+    nextPromise = afterPromise;   // slide the window forward
+  }
+}
+
+async function hardStop() {
+  for (const c of activeChunks) {
+    try { c.src.stop(); } catch(_) {}
+    try { c.src.disconnect(); c.gain.disconnect(); } catch(_) {}
+  }
+  activeChunks.clear();
+  $('playBtn').classList.remove('playing');
+  $('playBtn').innerHTML = svgPlay;
+}
+
+async function stopPlayback() {
+  isPlaying = false; playToken++;
+  if (masterGain && audioCtx) {
+    const now = audioCtx.currentTime;
+    masterGain.gain.cancelScheduledValues(now);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, now);
+    masterGain.gain.linearRampToValueAtTime(0, now + STOP_FADE);
+    await sleep(STOP_FADE * 1000 + 60);
+    masterGain.gain.value = parseFloat($('volume').value);
+  }
+  await hardStop(); setStatus('Ready');
+}
+
+async function startPlayback() {
+  await ensureAudio();
+  const token = ++playToken; isPlaying = true; chunkIdx = 0;
+  const now = audioCtx.currentTime;
+  masterGain.gain.cancelScheduledValues(now);
+  masterGain.gain.setValueAtTime(0, now);
+  masterGain.gain.linearRampToValueAtTime(parseFloat($('volume').value), now + PLAY_FADE);
+  $('playBtn').classList.add('playing'); $('playBtn').innerHTML = svgPause;
+  setStatus('Generating first chunk…', 'loading');
+  try {
+    const buf = await fetchChunk(0, FIRST_BEATS);
+    if (token !== playToken) return;
+    setStatus('Playing', 'playing');
+    streamLoop(buf, token).catch(async err => {
+      if (token !== playToken) return;
+      await hardStop(); setStatus('Error: ' + err.message, '');
+    });
+  } catch (err) {
+    await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
+  }
+}
+
+async function togglePlay() {
+  if (isPlaying) await stopPlayback();
+  else           await startPlayback();
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+async function exportWav() {
+  $('exportBtn').disabled = true; setStatus('Rendering full WAV…', 'loading');
+  try {
+    const r = await fetch('/api/render', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(getParams()),
+    });
+    if (!r.ok) throw new Error(`Server ${r.status}`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a'); a.href = url;
+    a.download = selPreset + '.wav'; a.click(); URL.revokeObjectURL(url);
+    setStatus('Downloaded', 'playing');
+  } catch (e) { setStatus('Export error: ' + e.message, ''); }
+  $('exportBtn').disabled = false;
+}
+
+// ── Preset & key data (already in HTML; JS just needs the defaults) ─────────
+const PRESETS_LIST = [
+  { id:'meditation',    name:'Meditation',    default_bpm:50, default_reverb:0.75, default_decay:1.4 },
+  { id:'evening_bells', name:'Evening Bells', default_bpm:45, default_reverb:0.80, default_decay:1.6 },
+];
+
+function selectPreset(id) {
+  document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+  const pill = document.getElementById('pill-' + id);
+  if (pill) pill.classList.add('active');
+  selPreset = id;
+  const p = presetDefs[id];
+  if (!p) return;
+  $('bpmSelect').value = p.default_bpm;
+  $('reverb').value    = p.default_reverb;
+  $('roomVal').textContent = parseFloat(p.default_reverb).toFixed(2);
+  $('decay').value     = p.default_decay;
+  $('decayVal').textContent = parseFloat(p.default_decay).toFixed(1) + '\u00d7';
+}
+
+PRESETS_LIST.forEach(p => { presetDefs[p.id] = p; });
+selectPreset('meditation');
+</script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+numpy
+scipy
+fastapi
+uvicorn[standard]

@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+venv/
+*.egg-info/
+dist/
+build/
+*.wav
+server_err.log
+engine/static/_check.js
