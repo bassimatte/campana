@@ -343,14 +343,13 @@
 
     <!-- Presets -->
     <div class="preset-grid" id="presetScroll">
-      <button class="pill active" id="pill-meditation"    onclick="selectPreset('meditation')">Meditazione</button>
-      <button class="pill"        id="pill-evening_bells" onclick="selectPreset('evening_bells')">Sera</button>
+      <button class="pill active" id="pill-sera"          onclick="selectPreset('sera')">Sera</button>
       <button class="pill"        id="pill-tempio"        onclick="selectPreset('tempio')">Tempio</button>
       <button class="pill"        id="pill-cristallo"     onclick="selectPreset('cristallo')">Cristallo</button>
       <button class="pill"        id="pill-cattedrale"    onclick="selectPreset('cattedrale')">Cattedrale</button>
       <button class="pill"        id="pill-deriva"        onclick="selectPreset('deriva')">Deriva</button>
       <button class="pill"        id="pill-notte"         onclick="selectPreset('notte')">Notte</button>
-      <button class="pill"        id="pill-giardino"      onclick="selectPreset('giardino')">Giardino</button>
+      <button class="pill"        id="pill-giardino"      onclick="selectPreset('giardino')">Festa</button>
       <button class="pill"        id="pill-aurora"        onclick="selectPreset('aurora')">Aurora</button>
     </div>
 
@@ -566,7 +565,7 @@
 </div>
 
 <script>
-//  API configuration 
+//  API configuration ─
 const CAMPANA_API_BASE = 'https://campana.onrender.com';
 function apiUrl(path) { return CAMPANA_API_BASE + path; }
 
@@ -924,14 +923,13 @@ async function exportWav() {
 
 // ── Preset & key data (already in HTML; JS just needs the defaults) ─────────
 const PRESETS_LIST = [
-  { id:'meditation',   name:'Meditazione', default_bpm:50,  default_key:'C',  default_scale_mode:'minor', default_reverb:0.75, default_decay:1.4,  default_texture:'tubular', default_reverb_damping:0.4,  default_reverb_width:0.8,  default_reverb_wet:0.35, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0,    default_strike:0,   default_attack_ms:0, default_humanize:0,    default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
-  { id:'evening_bells',name:'Sera',        default_bpm:45,  default_key:'D',  default_scale_mode:'minor', default_reverb:0.82, default_decay:1.8,  default_texture:'church',  default_reverb_damping:0.55, default_reverb_width:0.9,  default_reverb_wet:0.45, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0,    default_strike:0.4, default_attack_ms:0, default_humanize:0.15, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'sera',         name:'Sera',        default_bpm:45,  default_key:'D',  default_scale_mode:'minor',      default_reverb:0.82, default_decay:1.8,  default_texture:'church',  default_reverb_damping:0.55, default_reverb_width:0.9,  default_reverb_wet:0.45, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0,    default_strike:0.4, default_attack_ms:0, default_humanize:0.15, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'tempio',       name:'Tempio',      default_bpm:35,  default_key:'G',  default_scale_mode:'dorian',     default_reverb:0.88, default_decay:2.2,  default_texture:'bowl',    default_reverb_damping:0.6,  default_reverb_width:0.95, default_reverb_wet:0.55, default_delay_time:420, default_delay_feedback:0.4,  default_delay_wet:0,    default_shimmer:0.1,  default_beating:0.45, default_strike:0,   default_attack_ms:8, default_humanize:0.25, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'cristallo',    name:'Cristallo',   default_bpm:60,  default_key:'Bb', default_scale_mode:'pentatonic', default_reverb:0.70, default_decay:1.2,  default_texture:'crystal', default_reverb_damping:0.25, default_reverb_width:0.95, default_reverb_wet:0.40, default_delay_time:275, default_delay_feedback:0.5,  default_delay_wet:0.25, default_shimmer:0.35, default_beating:0.2,  default_strike:0,   default_attack_ms:5, default_humanize:0.3,  default_density:0.9,  default_octave_spread:1.0, default_base_octave:1,  default_time_scatter:0.15 },
-  { id:'cattedrale',   name:'Cattedrale',  default_bpm:30,  default_key:'D',  default_scale_mode:'minor', default_reverb:0.95, default_decay:2.3,  default_texture:'church',  default_reverb_damping:0.7,  default_reverb_width:0.95, default_reverb_wet:0.60, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0.1,  default_strike:0.6, default_attack_ms:0, default_humanize:0.1,  default_density:0.85, default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
-  { id:'deriva',       name:'Deriva',      default_bpm:50,  default_key:'Eb', default_scale_mode:'minor', default_reverb:0.78, default_decay:1.5,  default_texture:'crystal', default_reverb_damping:0.35, default_reverb_width:0.90, default_reverb_wet:0.42, default_delay_time:350, default_delay_feedback:0.55, default_delay_wet:0.28, default_shimmer:0.2,  default_beating:0.15, default_strike:0,   default_attack_ms:8, default_humanize:0.5,  default_density:0.85, default_octave_spread:1.5, default_base_octave:0,  default_time_scatter:0.65 },
+  { id:'cattedrale',   name:'Cattedrale',  default_bpm:30,  default_key:'D',  default_scale_mode:'minor',      default_reverb:0.95, default_decay:2.3,  default_texture:'church',  default_reverb_damping:0.7,  default_reverb_width:0.95, default_reverb_wet:0.60, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0.1,  default_strike:0.6, default_attack_ms:0, default_humanize:0.1,  default_density:0.85, default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'deriva',       name:'Deriva',      default_bpm:50,  default_key:'Eb', default_scale_mode:'minor',      default_reverb:0.78, default_decay:1.5,  default_texture:'crystal', default_reverb_damping:0.35, default_reverb_width:0.90, default_reverb_wet:0.42, default_delay_time:350, default_delay_feedback:0.55, default_delay_wet:0.28, default_shimmer:0.2,  default_beating:0.15, default_strike:0,   default_attack_ms:8, default_humanize:0.5,  default_density:0.85, default_octave_spread:1.5, default_base_octave:0,  default_time_scatter:0.65 },
   { id:'notte',        name:'Notte',       default_bpm:40,  default_key:'F',  default_scale_mode:'minor',      default_reverb:0.85, default_decay:1.9,  default_texture:'tubular', default_reverb_damping:0.5,  default_reverb_width:0.85, default_reverb_wet:0.48, default_delay_time:480, default_delay_feedback:0.42, default_delay_wet:0.18, default_shimmer:0,    default_beating:0.35, default_strike:0.2, default_attack_ms:0, default_humanize:0.1,  default_density:0.9,  default_octave_spread:0,   default_base_octave:-1, default_time_scatter:0    },
-  { id:'giardino',     name:'Giardino',    default_bpm:55,  default_key:'A',  default_scale_mode:'pentatonic', default_reverb:0.72, default_decay:1.1,  default_texture:'crystal', default_reverb_damping:0.20, default_reverb_width:0.95, default_reverb_wet:0.38, default_delay_time:260, default_delay_feedback:0.48, default_delay_wet:0.22, default_shimmer:0.45, default_beating:0.1,  default_strike:0,   default_attack_ms:6, default_humanize:0.35, default_density:0.8,  default_octave_spread:1.2, default_base_octave:1,  default_time_scatter:0.35 },
+  { id:'giardino',     name:'Festa',       default_bpm:90,  default_key:'C',  default_scale_mode:'major',      default_reverb:0.45, default_decay:0.8,  default_texture:'tubular', default_reverb_damping:0.55, default_reverb_width:0.70, default_reverb_wet:0.22, default_delay_time:200, default_delay_feedback:0.25, default_delay_wet:0,    default_shimmer:0,    default_beating:0,    default_strike:0.25,default_attack_ms:0, default_humanize:0.20, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'aurora',       name:'Aurora',      default_bpm:45,  default_key:'D',  default_scale_mode:'whole_tone', default_reverb:0.80, default_decay:1.6,  default_texture:'crystal', default_reverb_damping:0.20, default_reverb_width:0.98, default_reverb_wet:0.50, default_delay_time:320, default_delay_feedback:0.52, default_delay_wet:0.30, default_shimmer:0.40, default_beating:0.08, default_strike:0,   default_attack_ms:8, default_humanize:0.20, default_density:0.95, default_octave_spread:0.8, default_base_octave:0,  default_time_scatter:0.10 },
 ];
 
@@ -980,7 +978,7 @@ function selectPreset(id) {
 }
 
 PRESETS_LIST.forEach(p => { presetDefs[p.id] = p; });
-selectPreset('meditation');
+selectPreset('sera');
 
 // Mark dirty on any control change while playing
 document.querySelector('.inner').addEventListener('input',  markDirty);

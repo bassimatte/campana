@@ -65,7 +65,7 @@ def main():
     parser = argparse.ArgumentParser(description="Bells Generator — Melodic bell synthesiser")
     parser.add_argument("--gui",     action="store_true", help="Launch web UI")
     parser.add_argument("--list",    action="store_true", help="List presets")
-    parser.add_argument("--preset",  default="meditation",
+    parser.add_argument("--preset",  default="sera",
                         choices=list(PRESETS.keys()), help="Preset to render")
     parser.add_argument("--key",     default=None,
                         choices=list(KEYS.keys()), help="Musical key (default: preset default)")
