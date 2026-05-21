@@ -220,7 +220,7 @@
     select:focus { outline: none; border-color: var(--accent); }
     .sfield.full { grid-column: 1 / -1; }
 
-    /* ── Info button ── */
+    /* ── Header icon buttons (info + settings) ── */
     .info-btn {
       width: 28px; height: 28px; border-radius: 50%;
       border: 1.5px solid var(--card-border);
@@ -332,14 +332,23 @@
     }
     .btn-export:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
     .btn-export:disabled { opacity: 0.38; cursor: not-allowed; }
-    .export-dur {
-      height: 38px; padding: 0 10px; border-radius: 100px;
-      border: 1.5px solid var(--card-border); background: transparent;
-      color: var(--muted); font-family: inherit; font-size: 12px;
+
+    /* ── Settings modal ── */
+    .settings-section { margin-bottom: 20px; }
+    .settings-section:last-child { margin-bottom: 0; }
+    .settings-section h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+    .settings-row { display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; }
+    .settings-label { font-size: 13px; color: var(--fg); }
+    .settings-select {
+      height: 34px; padding: 0 10px; border-radius: 8px;
+      border: 1.5px solid var(--card-border); background: var(--seg-bg);
+      color: var(--fg); font-family: inherit; font-size: 13px;
       cursor: pointer; outline: none; appearance: none; -webkit-appearance: none;
-      transition: all 0.15s;
+      min-width: 90px; text-align: right; transition: all 0.15s;
     }
-    .export-dur:hover, .export-dur:focus { border-color: var(--accent-mid); color: var(--accent); }
+    .settings-select:hover, .settings-select:focus { border-color: var(--accent-mid); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -351,6 +360,7 @@
     <div class="hdr-right">
       <span class="status-dot" id="statusDot"></span>
       <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+      <button class="info-btn" onclick="openSettings()" title="Settings">⚙</button>
       <button class="info-btn" onclick="openInfo()" title="About Campana">ⓘ</button>
     </div>
   </div>
@@ -550,15 +560,33 @@
       </svg>
       Export
     </button>
-    <select class="export-dur" id="exportDur" title="Export duration">
-      <option value="1">1 min</option>
-      <option value="2">2 min</option>
-      <option value="5" selected>5 min</option>
-      <option value="10">10 min</option>
-    </select>
   </div>
 
 </div><!-- /shell -->
+
+<!-- Settings modal -->
+<div class="modal-overlay" id="settingsModal" onclick="closeSettingsOnBg(event)">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-hdr">
+      <span class="modal-title">Settings</span>
+      <button class="modal-close" onclick="closeSettings()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <h3>Export</h3>
+        <div class="settings-row">
+          <span class="settings-label">Duration</span>
+          <select class="settings-select" id="exportDur" title="Export duration">
+            <option value="1">1 minute</option>
+            <option value="2" selected>2 minutes</option>
+            <option value="3">3 minutes</option>
+            <option value="4">4 minutes</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Info modal -->
 <div class="modal-overlay" id="infoModal" onclick="closeInfoOnBg(event)">
@@ -627,6 +655,11 @@ window.onunhandledrejection = e => {
 function openInfo()  { document.getElementById('infoModal').classList.add('open'); }
 function closeInfo() { document.getElementById('infoModal').classList.remove('open'); }
 function closeInfoOnBg(e) { if (e.target === e.currentTarget) closeInfo(); }
+
+// ── Settings modal ─────────────────────────────────────────────────────────
+function openSettings()  { document.getElementById('settingsModal').classList.add('open'); }
+function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
+function closeSettingsOnBg(e) { if (e.target === e.currentTarget) closeSettings(); }
 
 // ── Theme ──────────────────────────────────────────────────────────────────
 function toggleTheme() {
@@ -1027,8 +1060,8 @@ async function togglePlay() {
 
 // ── Export ─────────────────────────────────────────────────────────────────
 async function exportWav() {
-  const minutes = parseFloat($('exportDur').value) || 5;
-  $('exportBtn').disabled = true; $('exportDur').disabled = true;
+  const minutes = parseFloat($('exportDur').value) || 2;
+  $('exportBtn').disabled = true;
   setStatus('Starting render…', 'loading');
   try {
     // 1. Start background render job — returns immediately with job_id
@@ -1067,7 +1100,7 @@ async function exportWav() {
   } catch (e) {
     setStatus('Export error: ' + e.message, '');
   }
-  $('exportBtn').disabled = false; $('exportDur').disabled = false;
+  $('exportBtn').disabled = false;
 }
 
 // ── Preset & key data (already in HTML; JS just needs the defaults) ─────────
