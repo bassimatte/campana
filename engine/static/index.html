@@ -290,6 +290,22 @@
       padding: 16px 20px;
       display: flex; align-items: center; gap: 12px;
     }
+    .seed-group { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    .seed-toggle {
+      background: none; border: 1.5px solid var(--card-border); border-radius: 50%;
+      width: 28px; height: 28px; cursor: pointer; font-size: 13px;
+      color: var(--muted); display: grid; place-items: center;
+      transition: all 0.15s; flex-shrink: 0;
+    }
+    .seed-toggle.locked { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
+    .seed-input {
+      width: 52px; height: 28px; border: 1.5px solid var(--card-border);
+      border-radius: 8px; background: var(--card); color: var(--text);
+      font-size: 11px; text-align: center; font-family: inherit; padding: 0 4px;
+      transition: border-color 0.15s;
+    }
+    .seed-input:not(:disabled):focus { outline: none; border-color: var(--accent-mid); }
+    .seed-input:disabled { opacity: 0.35; }
     .btn-play {
       width: 52px; height: 52px; border-radius: 50%; border: none;
       background: var(--accent); cursor: pointer; flex-shrink: 0;
@@ -512,6 +528,10 @@
         <polygon points="6,3 18,10 6,17" fill="white"/>
       </svg>
     </button>
+    <div class="seed-group">
+      <button class="seed-toggle" id="seedToggle" onclick="toggleSeedLock()" title="Random seed — click to lock">🎲</button>
+      <input type="number" id="seedVal" class="seed-input" value="42" min="0" max="99999" step="1" disabled title="Seed value">
+    </div>
     <div class="transport-info">
       <div class="t-status" id="tStatus">Ready</div>
     </div>
@@ -638,7 +658,18 @@ function setVolume() {
   if (masterGain) masterGain.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
 }
 
-// ── Params ─────────────────────────────────────────────────────────────────
+// ── Seed ───────────────────────────────────────────────────────────────────
+function toggleSeedLock() {
+  seedLocked = !seedLocked;
+  const btn = document.getElementById('seedToggle');
+  const inp = document.getElementById('seedVal');
+  btn.classList.toggle('locked', seedLocked);
+  btn.title = seedLocked ? 'Fixed seed — click to randomize' : 'Random seed — click to lock';
+  btn.textContent = seedLocked ? '🔒' : '🎲';
+  inp.disabled = !seedLocked;
+}
+
+
 function getParams() {
   return {
     preset:            selPreset,
@@ -663,6 +694,7 @@ function getParams() {
     time_scatter:      parseFloat($('time_scatter').value),
     shimmer:           parseFloat($('shimmer').value),
     scale_mode:        $('scale_mode').value,
+    seed_base:         sessionSeed,
   };
 }
 
@@ -672,9 +704,10 @@ let masterGain  = null;
 let isPlaying   = false;
 let playToken   = 0;
 let activeChunks= new Set();
-let chunkIdx    = 0;
 let selPreset   = 'meditation';
 let presetDefs  = {};
+let sessionSeed = 42;
+let seedLocked  = false;
 
 const FIRST_BEATS = 6;
 const CHUNK_BEATS = 12;
@@ -682,6 +715,14 @@ const CROSSFADE   = 0.5;
 const PLAY_FADE   = 0.3;
 const STOP_FADE   = 0.5;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Sleep until audioCtx reaches targetTime, checking every 300 ms so stop
+// commands are responsive. Never sleeps if the target is already past.
+async function sleepUntil(targetTime, token) {
+  while (audioCtx.currentTime < targetTime && isPlaying && playToken === token) {
+    await sleep(300);
+  }
+}
 
 // ── Canvas waveform ────────────────────────────────────────────────────────
 const canvas = $('viz');
@@ -852,9 +893,9 @@ async function streamLoop(firstBuffer, token) {
     p2 = fetchChunk(nextBeat, CHUNK_BEATS);
     nextBeat += CHUNK_BEATS;
 
-    // Sleep until 1.5 s before the current chunk ends — give server ample time
-    const napMs = Math.max(0, (schedEnd - audioCtx.currentTime - 1.5) * 1000);
-    if (napMs > 50) await sleep(Math.min(napMs, 600));
+    // Sleep until 1.5 s before the current chunk ends — give server ample time.
+    // sleepUntil checks stop condition every 300 ms so it's responsive to pause.
+    await sleepUntil(schedEnd - 1.5, token);
     if (!isPlaying || token !== playToken) break;
   }
 }
@@ -883,6 +924,13 @@ async function stopPlayback() {
 
 async function startPlayback() {
   await ensureAudio();
+  // Set session seed: fixed (from input) or random (shown in input for reference)
+  if (seedLocked) {
+    sessionSeed = parseInt($('seedVal').value) || 42;
+  } else {
+    sessionSeed = Math.floor(Math.random() * 99999);
+    $('seedVal').value = sessionSeed;
+  }
   const token = ++playToken; isPlaying = true; isDirty = false;
   const now = audioCtx.currentTime;
   masterGain.gain.cancelScheduledValues(now);

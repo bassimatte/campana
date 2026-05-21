@@ -99,7 +99,7 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
         attack_ms          = p["attack_ms"],
         beating            = p["beating"],
         strike_level       = p["strike_level"],
-        seed               = 42 + int(beat_offset) * 137,
+        seed               = int(body.get("seed_base", 42)) + int(beat_offset) * 137,
         delay_time         = p["delay_time"],
         delay_feedback     = p["delay_feedback"],
         delay_wet          = p["delay_wet"],
