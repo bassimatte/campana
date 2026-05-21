@@ -829,19 +829,23 @@ async function fetchChunk(beatOffset, beats) {
   return audioCtx.decodeAudioData(await resp.arrayBuffer());
 }
 
-function scheduleChunk(buffer, startTime, token) {
+// scheduleChunk: schedule buffer at startTime using musicBeats (not buffer.duration)
+// to compute the hand-off time. The reverb tail in the buffer keeps playing
+// naturally, overlapping with the next chunk for a continuous soundscape.
+function scheduleChunk(buffer, startTime, token, musicBeats) {
+  const bpm      = parseInt($('bpmSelect').value);
+  const musicDur = musicBeats * 60.0 / bpm;          // actual notes window (s)
+  const fade     = Math.min(CROSSFADE, musicDur * 0.1);
+  const end      = startTime + buffer.duration;       // full buffer inc. reverb tail
+  const s0       = startTime + fade;                  // end of fade-in
+
   const src  = audioCtx.createBufferSource();
   const gain = audioCtx.createGain();
-  const fade = Math.min(CROSSFADE, buffer.duration * 0.1);
-  const end  = startTime + buffer.duration;
-  const s0   = Math.min(startTime + fade, end);
-  const s1   = Math.max(s0, end - fade);
 
   src.buffer = buffer; src.connect(gain); gain.connect(masterGain);
+  // Fade in only — the reverb tail decays to silence by itself.
   gain.gain.setValueAtTime(0, startTime);
   gain.gain.linearRampToValueAtTime(1, s0);
-  gain.gain.setValueAtTime(1, s1);
-  gain.gain.linearRampToValueAtTime(0, end);
 
   const chunk = { src, gain, token };
   activeChunks.add(chunk);
@@ -851,7 +855,11 @@ function scheduleChunk(buffer, startTime, token) {
   };
   src.start(startTime);
   src.stop(end + 0.02);
-  return { endTime: end, fade };
+
+  // schedEnd is based on musical content, not buffer length —
+  // that's where the next chunk's fade-in should begin.
+  const schedEnd = startTime + musicDur - fade;
+  return { endTime: end, fade, schedEnd };
 }
 
 // ── Streaming loop — schedule-ahead strategy ─────────────────────────────
@@ -860,10 +868,10 @@ function scheduleChunk(buffer, startTime, token) {
 // beat_offset is tracked client-side and passed directly to the server so
 // the sequence is always contiguous (no skipped beats from index arithmetic).
 async function streamLoop(firstBuffer, token) {
-  // Schedule first (short) buffer
+  // Schedule first (short) buffer — musicBeats = FIRST_BEATS
   let schedEnd = audioCtx.currentTime + 0.05;
-  const s0 = scheduleChunk(firstBuffer, schedEnd, token);
-  schedEnd = s0.endTime - s0.fade;
+  const s0 = scheduleChunk(firstBuffer, schedEnd, token, FIRST_BEATS);
+  schedEnd = s0.schedEnd;  // music-based hand-off time
 
   // Track the beat position after the first chunk
   let nextBeat = FIRST_BEATS;
@@ -886,9 +894,9 @@ async function streamLoop(firstBuffer, token) {
     }
     if (!isPlaying || token !== playToken) break;
 
-    // Schedule immediately — clamp only if we're somehow already late
-    const sched = scheduleChunk(buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token);
-    schedEnd = sched.endTime - sched.fade;
+    // Schedule immediately using music-based timing
+    const sched = scheduleChunk(buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token, CHUNK_BEATS);
+    schedEnd = sched.schedEnd;
     setStatus('Playing', 'playing');
 
     // Slide the prefetch window: p2 becomes p1, fire a new p2
@@ -896,8 +904,7 @@ async function streamLoop(firstBuffer, token) {
     p2 = fetchChunk(nextBeat, CHUNK_BEATS);
     nextBeat += CHUNK_BEATS;
 
-    // Sleep until 1.5 s before the current chunk ends — give server ample time.
-    // sleepUntil checks stop condition every 300 ms so it's responsive to pause.
+    // Sleep until 1.5 s before musical content ends — keeps exactly 2 fetches in-flight
     await sleepUntil(schedEnd - 1.5, token);
     if (!isPlaying || token !== playToken) break;
   }
