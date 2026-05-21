@@ -966,7 +966,7 @@ async function ensureAudio() {
 }
 
 async function fetchChunk(beatOffset, beats) {
-  const resp = await fetch('/api/preview', {
+  const resp = await fetch(apiUrl('/api/preview'), {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ ...getParams(), beat_offset: beatOffset, chunk_beats: beats }),
