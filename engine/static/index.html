@@ -595,6 +595,8 @@
 </div>
 
 <script>
+// ── API URL helper (passthrough for local server; replaced in docs build) ──
+function apiUrl(path) { return path; }
 // ── Global error trap — shows JS errors in the status bar ──────────────────
 window.onerror = (msg, src, line) => {
   const el = document.getElementById('tStatus');
@@ -1010,26 +1012,44 @@ async function togglePlay() {
 
 // ── Export ─────────────────────────────────────────────────────────────────
 async function exportWav() {
-  $('exportBtn').disabled = true; setStatus('Rendering WAV (may take ~15s)…', 'loading');
+  $('exportBtn').disabled = true;
+  setStatus('Starting render…', 'loading');
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 120_000); // 2-min timeout
-    const r = await fetch('/api/render', {
+    // 1. Start background render job — returns immediately with job_id
+    const startR = await fetch(apiUrl('/api/render'), {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify(getParams()),
-      signal: ctrl.signal,
     });
-    clearTimeout(timer);
-    if (!r.ok) {
-      const txt = await r.text().catch(() => r.status);
-      throw new Error(`Server ${r.status}: ${txt}`);
+    if (!startR.ok) {
+      const txt = await startR.text().catch(() => startR.status);
+      throw new Error(`Server ${startR.status}: ${txt}`);
     }
-    const url = URL.createObjectURL(await r.blob());
+    const { job_id } = await startR.json();
+
+    // 2. Poll until done (check every 2 s, give up after 3 min)
+    const deadline = Date.now() + 180_000;
+    let status = 'pending', elapsed = 0;
+    while (status === 'pending') {
+      await sleep(2000);
+      elapsed += 2;
+      setStatus(`Rendering WAV… (${elapsed}s)`, 'loading');
+      if (Date.now() > deadline) throw new Error('timed out after 3 minutes');
+      const sr = await fetch(apiUrl(`/api/render/${job_id}`));
+      const sj = await sr.json();
+      status = sj.status;
+      if (status === 'error') throw new Error(sj.error || 'server render error');
+    }
+
+    // 3. Download the finished file
+    setStatus('Downloading…', 'loading');
+    const dlR = await fetch(apiUrl(`/api/render/${job_id}/file`));
+    if (!dlR.ok) throw new Error(`Download failed: ${dlR.status}`);
+    const url = URL.createObjectURL(await dlR.blob());
     const a = document.createElement('a'); a.href = url;
     a.download = selPreset + '.wav'; a.click(); URL.revokeObjectURL(url);
     setStatus('Downloaded ✓', 'playing');
   } catch (e) {
-    setStatus('Export error: ' + (e.name === 'AbortError' ? 'timed out' : e.message), '');
+    setStatus('Export error: ' + e.message, '');
   }
   $('exportBtn').disabled = false;
 }

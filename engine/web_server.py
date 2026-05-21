@@ -11,6 +11,7 @@ import json
 import logging
 import threading
 import traceback
+import uuid
 from pathlib import Path
 
 try:
@@ -30,6 +31,10 @@ from .presets import PRESETS, KEYS, SCALES
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_DIR.mkdir(exist_ok=True)
+
+# ── Background render jobs (async export) ─────────────────────────────────────
+_render_jobs: dict = {}   # job_id → {status, data, fname, error}
+_JOBS_MAX = 20            # cap in-memory slots
 
 app = FastAPI(title="Bells Generator", version="1.0")
 
@@ -244,19 +249,60 @@ async def preview_audio(request: Request):
 
 
 @app.post("/api/render")
-async def render_audio(request: Request):
+async def start_render(request: Request):
+    """Start a background render job. Returns {job_id} immediately."""
     body  = await request.json()
     p     = _parse_render_params(body)
     name  = (PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values())))["name"]
     fname = name.replace(" ", "_") + ".wav"
-    try:
-        wav = await asyncio.to_thread(_do_full_render, p)
-    except Exception:
-        tb = traceback.format_exc()
-        logging.error("render error:\n%s\nparams: %s", tb, p)
-        return JSONResponse({"detail": tb}, status_code=500)
-    return StreamingResponse(
-        io.BytesIO(wav),
+
+    job_id = uuid.uuid4().hex[:10]
+    # Evict oldest job if at capacity
+    if len(_render_jobs) >= _JOBS_MAX:
+        oldest = next(iter(_render_jobs))
+        del _render_jobs[oldest]
+    _render_jobs[job_id] = {"status": "pending", "data": None, "fname": fname, "error": None}
+
+    def _run():
+        try:
+            wav = _do_full_render(p)
+            _render_jobs[job_id]["data"]   = wav
+            _render_jobs[job_id]["status"] = "done"
+        except Exception:
+            tb = traceback.format_exc()
+            logging.error("render job %s error:\n%s", job_id, tb)
+            _render_jobs[job_id]["error"]  = tb
+            _render_jobs[job_id]["status"] = "error"
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"job_id": job_id})
+
+
+@app.get("/api/render/{job_id}")
+async def render_status(job_id: str):
+    """Poll render job status: {status: pending|done|error, error?: str}"""
+    job = _render_jobs.get(job_id)
+    if not job:
+        return JSONResponse({"status": "not_found"}, status_code=404)
+    resp = {"status": job["status"]}
+    if job["status"] == "error":
+        resp["error"] = job.get("error", "unknown error")
+    return JSONResponse(resp)
+
+
+@app.get("/api/render/{job_id}/file")
+async def download_render(job_id: str):
+    """Download the finished WAV. Cleans up the job after download."""
+    job = _render_jobs.get(job_id)
+    if not job:
+        return JSONResponse({"detail": "job not found"}, status_code=404)
+    if job["status"] != "done" or job["data"] is None:
+        return JSONResponse({"detail": "not ready"}, status_code=202)
+    wav   = job.pop("data")
+    fname = job["fname"]
+    del _render_jobs[job_id]
+    return Response(
+        content=wav,
         media_type="audio/wav",
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
