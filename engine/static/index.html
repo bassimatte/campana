@@ -956,14 +956,22 @@ function markDirty() {
 
 // ── Audio engine ───────────────────────────────────────────────────────────
 
-async function ensureAudio() {
+function initAudioSync() {
+  // Must run synchronously inside the gesture handler — iOS Safari revokes
+  // permission to resume AudioContext once any async operation has run.
   if (!audioCtx) {
     audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
     masterGain = audioCtx.createGain();
     masterGain.gain.value = parseFloat($('volume').value);
     masterGain.connect(audioCtx.destination);
   }
-  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  if (audioCtx.state === 'suspended') audioCtx.resume(); // intentionally not awaited here
+}
+
+async function ensureAudio() {
+  initAudioSync();
+  // Wait for context to actually be running before we try to schedule audio
+  if (audioCtx.state !== 'running') await audioCtx.resume();
 }
 
 async function fetchChunk(beatOffset, beats) {
@@ -1113,6 +1121,7 @@ async function startPlayback() {
 }
 
 async function togglePlay() {
+  initAudioSync(); // iOS: must happen synchronously in the tap handler, before any await
   if (isPlaying && isDirty) { await stopPlayback(); await startPlayback(); }
   else if (isPlaying)        { await stopPlayback(); }
   else                       { await startPlayback(); }
