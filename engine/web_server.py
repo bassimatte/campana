@@ -47,8 +47,8 @@ app.add_middleware(
         "http://localhost:8081",
         "http://127.0.0.1:8081",
     ],
-    allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
     expose_headers=["X-Events"],
 )
 
