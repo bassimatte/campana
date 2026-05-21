@@ -116,6 +116,28 @@
     .viz-label.playing { color: var(--accent); }
     .viz-label.loading { color: var(--accent); }
 
+    /* ── Wake banner (Render cold-start indicator) ── */
+    .wake-banner {
+      position: absolute; inset: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.5s ease;
+    }
+    .wake-banner.visible { opacity: 1; }
+    .wake-pill {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: 100px; padding: 7px 15px;
+      font-size: 11px; color: var(--muted); font-weight: 500;
+      letter-spacing: 0.04em;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+    .wake-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent); flex-shrink: 0;
+      animation: pulse 0.9s ease-in-out infinite;
+    }
+
     /* ── Inner padding ── */
     .inner { padding: 16px 20px 20px; }
 
@@ -372,6 +394,12 @@
   <div class="viz">
     <canvas id="viz"></canvas>
     <span class="viz-label" id="vizLabel">idle</span>
+    <div class="wake-banner" id="wakeBanner">
+      <div class="wake-pill">
+        <span class="wake-dot"></span>
+        <span id="wakeText">waking up…</span>
+      </div>
+    </div>
   </div>
 
   <div class="inner">
@@ -653,7 +681,35 @@ window.onunhandledrejection = e => {
   if (el) el.textContent = 'Async error: ' + (e.reason?.message || e.reason);
 };
 
-// ── Info modal ─────────────────────────────────────────────────────────────
+// ── Cold-start wakeup indicator (GitHub Pages / Render only) ──────────────
+(function () {
+  if (typeof CAMPANA_API_BASE === 'undefined') return; // local — skip
+  const banner   = document.getElementById('wakeBanner');
+  const wakeText = document.getElementById('wakeText');
+  let bannerShown = false;
+
+  // Show banner after 1.5 s if server hasn't replied yet
+  const showTimer = setTimeout(() => {
+    bannerShown = true;
+    banner.classList.add('visible');
+  }, 1500);
+
+  // After 15 s, hint that it's a longer cold start
+  const hintTimer = setTimeout(() => {
+    if (bannerShown) wakeText.textContent = 'still waking… (~30s)';
+  }, 15000);
+
+  // Ping the server; hide banner when it responds (or errors)
+  fetch(apiUrl('/api/presets'))
+    .catch(() => {})
+    .finally(() => {
+      clearTimeout(showTimer);
+      clearTimeout(hintTimer);
+      banner.classList.remove('visible');
+    });
+})();
+
+
 function openInfo()  { document.getElementById('infoModal').classList.add('open'); }
 function closeInfo() { document.getElementById('infoModal').classList.remove('open'); }
 function closeInfoOnBg(e) { if (e.target === e.currentTarget) closeInfo(); }
