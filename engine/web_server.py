@@ -24,7 +24,7 @@ except ImportError:
         "Install with: pip install fastapi uvicorn[standard]"
     )
 
-from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events
+from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events, _LOOKAHEAD_BEATS
 from .presets import PRESETS, KEYS, SCALES
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -43,7 +43,22 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+_EPOCH_BEATS = 16.0   # generate notes in independent 16-beat windows → truly infinite
+
+
+def _epoch_events(scale_mode: str, gen_params: dict, seed_base: int,
+                  start_beat: float, end_beat: float) -> list:
+    """Return events at absolute beat positions covering [start_beat, end_beat).
+    Each 16-beat epoch has its own seed, so the music never repeats."""
+    first_ep = max(0, int(start_beat // _EPOCH_BEATS))
+    last_ep  = int(end_beat // _EPOCH_BEATS)
+    events: list = []
+    for ep in range(first_ep, last_ep + 1):
+        ep_seed   = seed_base + ep * 997
+        ep_events = generate_bell_events(scale_mode, _EPOCH_BEATS, gen_params, ep_seed)
+        ep_start  = ep * _EPOCH_BEATS
+        events.extend((e[0] + ep_start, e[1], e[2], e[3]) for e in ep_events)
+    return events
 
 def _parse_render_params(body: dict) -> dict:
     return dict(
@@ -76,20 +91,24 @@ def _parse_render_params(body: dict) -> dict:
 def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
-    total_beats   = float(preset["total_beats"])
-    beat_offset   = float(body.get("beat_offset", 0.0)) % total_beats
 
-    # Generate a fresh melody for this cycle using the cycle seed
-    cycle_num   = int(float(body.get("beat_offset", 0.0)) // total_beats) if total_beats > 0 else 0
-    cycle_seed  = p["seed_base"] + cycle_num * 999
-    all_events  = generate_bell_events(p["scale_mode"], total_beats,
-                                       preset.get("gen_params", {}), cycle_seed)
+    # Raw beat offset — no modulo. Time is infinite; epochs handle the variety.
+    raw_offset = float(body.get("beat_offset", 0.0))
+
+    # Collect events from all epochs overlapping [raw_offset - LOOK, raw_offset + chunk_beats]
+    all_events = _epoch_events(
+        p["scale_mode"],
+        preset.get("gen_params", {}),
+        p["seed_base"],
+        start_beat = raw_offset - _LOOKAHEAD_BEATS,
+        end_beat   = raw_offset + chunk_beats,
+    )
 
     audio = render_chunk(
         all_events,
-        beat_offset        = beat_offset,
+        beat_offset        = raw_offset,
         chunk_beats        = chunk_beats,
-        total_beats        = total_beats,
+        total_beats        = 999_999,   # effectively infinite — no looping
         bpm                = p["bpm"],
         reverb_room        = p["reverb_room"],
         reverb_damping     = p["reverb_damping"],
@@ -105,7 +124,7 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
         attack_ms          = p["attack_ms"],
         beating            = p["beating"],
         strike_level       = p["strike_level"],
-        seed               = int(body.get("seed_base", 42)) + int(beat_offset) * 137,
+        seed               = p["seed_base"] + int(raw_offset) * 137,
         delay_time         = p["delay_time"],
         delay_feedback     = p["delay_feedback"],
         delay_wet          = p["delay_wet"],
@@ -119,8 +138,14 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
 def _do_full_render(p: dict) -> bytes:
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
-    all_events    = generate_bell_events(p["scale_mode"], preset["total_beats"],
-                                         preset.get("gen_params", {}), p["seed_base"])
+    export_beats  = float(preset["total_beats"])   # use preset duration for export length
+    all_events    = [e for e in _epoch_events(
+        p["scale_mode"],
+        preset.get("gen_params", {}),
+        p["seed_base"],
+        start_beat = 0,
+        end_beat   = export_beats,
+    ) if e[0] < export_beats]
     audio = render_track(
         all_events,
         total_beats        = preset["total_beats"],
