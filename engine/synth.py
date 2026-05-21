@@ -445,28 +445,45 @@ def generate_bell_events(scale_mode: str, total_beats: float,
 
     events: list = []
 
+    def walk_step(rng, pos: int, pool_size: int, steps, weights,
+                  leap_prob: float = 0.12) -> int:
+        """Random walk with boundary bouncing and occasional leaps.
+        Never clips at edges (which causes clustering), instead bounces.
+        Occasional random leap prevents long-term clustering."""
+        if rng.random() < leap_prob:
+            return int(rng.integers(0, pool_size))
+        step    = int(rng.choice(steps, p=weights))
+        new_pos = pos + step
+        # Bounce off boundaries instead of clamping
+        if new_pos < 0:
+            new_pos = abs(new_pos)
+        elif new_pos >= pool_size:
+            new_pos = 2 * pool_size - new_pos - 2
+        return int(np.clip(new_pos, 0, pool_size - 1))
+
     # ── Melody voice ──────────────────────────────────────────────────────────
     sp_lo, sp_hi = gen_params.get("note_spacing_range", (0.75, 2.0))
     vel_base     = gen_params.get("velocity_base", 0.65)
     bias         = gen_params.get("walk_bias", 0)
 
-    steps = np.array([-2, -1, 0, 1, 2])
+    # No step=0 so the note always changes; ±3 allows broader leaps
+    mel_steps = np.array([-3, -2, -1, 1, 2, 3])
     if bias > 0:
-        w = np.array([1.0, 2.0, 3.0, 4.0, 2.0])
+        mel_w = np.array([1.0, 2.0, 3.0, 4.0, 3.0, 2.0])
     elif bias < 0:
-        w = np.array([2.0, 4.0, 3.0, 2.0, 1.0])
+        mel_w = np.array([2.0, 3.0, 4.0, 3.0, 2.0, 1.0])
     else:
-        w = np.array([2.0, 3.0, 3.0, 3.0, 2.0])
-    w /= w.sum()
+        mel_w = np.array([2.0, 3.0, 4.0, 4.0, 3.0, 2.0])
+    mel_w /= mel_w.sum()
 
-    pos  = len(melody_pool) // 3
+    mel_size = len(melody_pool)
+    pos  = mel_size // 2          # start in the middle, not 1/3
     beat = float(rng.uniform(0, max(0.01, sp_lo * 0.5)))
     while beat < total_beats:
-        step = int(rng.choice(steps, p=w))
-        pos  = int(np.clip(pos + step, 0, len(melody_pool) - 1))
+        pos  = walk_step(rng, pos, mel_size, mel_steps, mel_w)
         note = midi_to_name(melody_pool[pos])
         vel  = float(np.clip(
-            vel_base + 0.3 * (pos / max(1, len(melody_pool) - 1)) + rng.uniform(-0.08, 0.08),
+            vel_base + 0.3 * (pos / max(1, mel_size - 1)) + rng.uniform(-0.08, 0.08),
             0.15, 1.0))
         dur  = float(rng.choice([0.5, 0.5, 1.0, 1.0, 2.0]))
         events.append((beat, note, dur, vel))
@@ -476,14 +493,17 @@ def generate_bell_events(scale_mode: str, total_beats: float,
     if gen_params.get("bass_enabled", True) and bass_pool:
         sp_lo2, sp_hi2 = gen_params.get("bass_spacing_range", (2.0, 5.0))
         vel_b2         = gen_params.get("bass_velocity_base", 0.50)
-        pos2  = len(bass_pool) // 2
+        bas_steps = np.array([-2, -1, 1, 2])
+        bas_w     = np.array([1.0, 2.0, 2.0, 1.0])
+        bas_w    /= bas_w.sum()
+        bas_size  = len(bass_pool)
+        pos2  = bas_size // 2
         beat2 = float(rng.uniform(0, sp_lo2))
         while beat2 < total_beats:
-            pos2  = int(np.clip(
-                pos2 + int(rng.choice([-1, 0, 0, 1])), 0, len(bass_pool) - 1))
+            pos2  = walk_step(rng, pos2, bas_size, bas_steps, bas_w, leap_prob=0.08)
             note2 = midi_to_name(bass_pool[pos2])
             vel2  = float(np.clip(
-                vel_b2 + 0.2 * (pos2 / max(1, len(bass_pool) - 1)) + rng.uniform(-0.05, 0.05),
+                vel_b2 + 0.2 * (pos2 / max(1, bas_size - 1)) + rng.uniform(-0.05, 0.05),
                 0.10, 0.80))
             dur2  = float(rng.choice([1.0, 2.0, 2.0, 4.0]))
             events.append((beat2, note2, dur2, vel2))
