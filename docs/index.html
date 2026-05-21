@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
@@ -323,13 +323,11 @@
 
   <!-- Header -->
   <div class="hdr">
-    <div style="display:flex;align-items:center;gap:10px">
-      <button class="info-btn" onclick="openInfo()" title="About Campana">ⓘ</button>
-      <span class="app-name">Campana</span>
-    </div>
+    <span class="app-name">Campana</span>
     <div class="hdr-right">
       <span class="status-dot" id="statusDot"></span>
       <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
+      <button class="info-btn" onclick="openInfo()" title="About Campana">ⓘ</button>
     </div>
   </div>
 
@@ -557,18 +555,29 @@
         <li><strong>Beating</strong> — slight detuning between partials, simulating the slow pulsations of real bells</li>
       </ul>
 
+      <h3>Presets</h3>
+      <ul>
+        <li><strong>Sera</strong> — Dusk church bells in D minor. Rich, warm strikes with deep reverb.</li>
+        <li><strong>Tempio</strong> — Tibetan singing bowls in G dorian. Slow, beating partials that shimmer and breathe.</li>
+        <li><strong>Cristallo</strong> — Crystal glass harmonics in B♭ pentatonic. Airy shimmer and scattered timing.</li>
+        <li><strong>Cattedrale</strong> — Cathedral tolls in D minor. The heaviest reverb, slowest pace, widest stereo field.</li>
+        <li><strong>Deriva</strong> — Floating, untethered bells in E♭ minor. Maximum scatter — notes drift freely off the grid.</li>
+        <li><strong>Notte</strong> — Dark, low-register bells in F minor. Sparse and contemplative, ideal for late hours.</li>
+        <li><strong>Festa</strong> — Bright C major arpeggios at 90 BPM. Joyful tubular bells with a jubilant high-register finale.</li>
+        <li><strong>Aurora</strong> — Whole-tone scale ascending and descending arc in D. Dreamy, ambiguous harmony with shimmer.</li>
+      </ul>
+
       <h3>Architecture</h3>
-      <p>Audio is rendered server-side in Python (NumPy + SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API plays chunks gaplessly using a double-buffer prefetch strategy.</p>
+      <p>Audio is rendered server-side in Python (NumPy + SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API plays chunks gaplessly using a two-chunk prefetch strategy.</p>
     </div>
     <div class="modal-foot">Produced by <strong>Matteo Bassi</strong></div>
   </div>
 </div>
 
 <script>
-//  API configuration ─
+//  Render.com API base (GitHub Pages static frontend) 
 const CAMPANA_API_BASE = 'https://campana.onrender.com';
 function apiUrl(path) { return CAMPANA_API_BASE + path; }
-
 // ── Global error trap — shows JS errors in the status bar ──────────────────
 window.onerror = (msg, src, line) => {
   const el = document.getElementById('tStatus');
@@ -804,53 +813,48 @@ function scheduleChunk(buffer, startTime, token) {
   return { endTime: end, fade };
 }
 
-// ── Streaming loop — Maresono double-prefetch strategy ────────────────────
-// Always keep TWO chunk requests in-flight simultaneously so rendering time
-// never causes a gap: while chunk N plays we have both N+1 and N+2 fetching.
+// ── Streaming loop — schedule-ahead strategy ─────────────────────────────
+// Keep 2 fetches in-flight at all times. Schedule each chunk immediately
+// when its fetch resolves — no busy-wait. Web Audio handles future startTimes.
 async function streamLoop(firstBuffer, token) {
-  let buffer    = firstBuffer;
-  let startTime = audioCtx.currentTime + 0.05;
+  // Schedule first (short) buffer
+  let schedEnd = audioCtx.currentTime + 0.05;
+  const s0 = scheduleChunk(firstBuffer, schedEnd, token);
+  schedEnd = s0.endTime - s0.fade;
   chunkIdx++;
 
-  // Eagerly start fetching next chunk immediately
-  let nextPromise = fetchChunk(chunkIdx, CHUNK_BEATS);
+  // Kick off two fetches in parallel right away
+  let p1 = fetchChunk(chunkIdx,     CHUNK_BEATS);
+  let p2 = fetchChunk(chunkIdx + 1, CHUNK_BEATS);
+  chunkIdx += 2;
 
   while (isPlaying && token === playToken) {
-    const sched     = scheduleChunk(buffer, startTime, token);
-    const nextStart = Math.max(audioCtx.currentTime + 0.05, sched.endTime - sched.fade);
-
-    chunkIdx++;
-    // Immediately start fetching the chunk AFTER next (stay 2 ahead)
-    const afterPromise = fetchChunk(chunkIdx, CHUNK_BEATS);
-
-    // Await the already-in-flight next chunk
-    let nextBuffer = null;
+    // Await the earlier-started fetch
+    let buf;
     try {
-      nextBuffer = await nextPromise;
+      buf = await p1;
     } catch (e) {
       if (!isPlaying || token !== playToken) break;
       setStatus('Buffering…', 'loading');
-      try { nextBuffer = await fetchChunk(chunkIdx - 1, CHUNK_BEATS); } catch (_) {}
-      if (!nextBuffer) { await hardStop(); setStatus('Error rendering chunk', ''); break; }
+      try { buf = await fetchChunk(chunkIdx - 2, CHUNK_BEATS); } catch (_) {}
+      if (!buf) { await hardStop(); setStatus('Render error', ''); break; }
     }
     if (!isPlaying || token !== playToken) break;
 
-    // Wait in small steps until just before the next chunk is needed
-    const waitUntil = nextStart - 0.08;
-    if (waitUntil > audioCtx.currentTime) {
-      const totalMs = (waitUntil - audioCtx.currentTime) * 1000;
-      const STEP    = 150;
-      let waited    = 0;
-      while (waited < totalMs && isPlaying && token === playToken) {
-        await sleep(Math.min(STEP, totalMs - waited));
-        waited += STEP;
-      }
-    }
-    if (!isPlaying || token !== playToken) break;
+    // Schedule immediately — clamp only if we're somehow already late
+    const sched = scheduleChunk(buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token);
+    schedEnd = sched.endTime - sched.fade;
+    setStatus('Playing', 'playing');
 
-    startTime   = Math.max(audioCtx.currentTime + 0.02, nextStart);
-    buffer      = nextBuffer;
-    nextPromise = afterPromise;   // slide the window forward
+    // Slide the prefetch window: p2 becomes p1, fire a new p2
+    p1 = p2;
+    p2 = fetchChunk(chunkIdx, CHUNK_BEATS);
+    chunkIdx++;
+
+    // Sleep until 1.5 s before the current chunk ends — give server ample time
+    const napMs = Math.max(0, (schedEnd - audioCtx.currentTime - 1.5) * 1000);
+    if (napMs > 50) await sleep(Math.min(napMs, 600));
+    if (!isPlaying || token !== playToken) break;
   }
 }
 
