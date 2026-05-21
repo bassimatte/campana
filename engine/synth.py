@@ -134,10 +134,13 @@ def bell_tone(freq: float, duration: float, velocity: float = 1.0,
     n   = int(SAMPLE_RATE * duration)
     t   = np.linspace(0, duration, n, endpoint=False)
     sig = np.zeros(n, dtype=np.float64)
+
+    # Perceptual velocity curve — soft notes feel softer, hard notes have more punch
+    vel_eff = float(np.clip(velocity ** 0.65, 0.05, 1.0))
+
     for i, (ratio, amp, tau) in enumerate(partials):
         # Velocity-dependent brightness: harder strikes excite higher partials more.
-        # At velocity 1.0 the highest partial gets a 70% boost; at 0.0 it drops 70%.
-        brightness = 1.0 + (velocity - 0.5) * 2.0 * (i / max(1, n_partials - 1)) * 0.7
+        brightness = 1.0 + (vel_eff - 0.5) * 2.0 * (i / max(1, n_partials - 1)) * 0.7
         eff_amp    = amp * max(0.02, brightness)
         detuning   = rng.uniform(-0.003, 0.003) * beating
         env  = np.exp(-t / (tau * decay_mult))
@@ -146,11 +149,12 @@ def bell_tone(freq: float, duration: float, velocity: float = 1.0,
     if attack_ms > 0.0:
         ramp_n = min(int(attack_ms * SAMPLE_RATE / 1000), n)
         sig[:ramp_n] *= np.linspace(0.0, 1.0, ramp_n)
-    # Strike transient
-    if strike_level > 0.0:
-        sig += _strike_transient(freq, n, strike_level, rng)
+    # Strike transient: auto-scales with velocity so hard notes feel physical
+    effective_strike = strike_level + vel_eff * 0.12
+    if effective_strike > 0.01:
+        sig += _strike_transient(freq, n, effective_strike, rng)
     peak = np.max(np.abs(sig)) or 1.0
-    return sig / peak * velocity
+    return sig / peak * vel_eff
 
 
 def _strike_transient(freq: float, n: int, level: float,
@@ -513,6 +517,7 @@ def generate_bell_events(scale_mode: str, total_beats: float,
 
 
 _LOOKAHEAD_BEATS = 8.0  # look back this many beats for reverb tails (gapless looping)
+_STEREO_MICRO    = 0.0012  # L/R frequency offset ≈ 2 cents → ~0.3–2.5 Hz natural beating
 
 
 def render_chunk(events: list, beat_offset: float, chunk_beats: float,
@@ -573,9 +578,13 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
             vel * (rng.uniform(1 - 0.25 * humanize, 1 + 0.1 * humanize) if is_normal else 1.0),
             0.05, 1.0))
         note_atk   = attack_ms * rng.uniform(0.5, 1.5) if (humanize > 0 and is_normal) else attack_ms
-        tone       = bell_tone(freq, dur_s, velocity=vel_scaled, decay_mult=decay_mult,
-                               texture=texture, attack_ms=note_atk,
-                               beating=beating, strike_level=strike_level if is_normal else 0.0)
+        # Render L and R at slightly different frequencies — creates natural beating/width
+        l_tone = bell_tone(freq * (1 + _STEREO_MICRO), dur_s, velocity=vel_scaled,
+                           decay_mult=decay_mult, texture=texture, attack_ms=note_atk,
+                           beating=beating, strike_level=strike_level if is_normal else 0.0)
+        r_tone = bell_tone(freq * (1 - _STEREO_MICRO), dur_s, velocity=vel_scaled,
+                           decay_mult=decay_mult, texture=texture, attack_ms=note_atk,
+                           beating=beating, strike_level=strike_level if is_normal else 0.0)
 
         if is_normal and time_scatter > 0:
             grid_t     = rel_beat * beat_dur + jitter
@@ -587,9 +596,10 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
 
         if start_samp < 0:
             skip = -start_samp
-            if skip >= len(tone):
+            if skip >= len(l_tone):
                 continue
-            tone       = tone[skip:]
+            l_tone     = l_tone[skip:]
+            r_tone     = r_tone[skip:]
             start_samp = 0
 
         base_pan = np.clip((freq - 400) / 1200 * pan_spread, -0.5, 0.5)
@@ -597,11 +607,11 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
         l_g      = np.sqrt(0.5 - pan * 0.5)
         r_g      = np.sqrt(0.5 + pan * 0.5)
 
-        end    = min(start_samp + len(tone), total_samp)
-        length = end - start_samp
+        end_l  = min(start_samp + len(l_tone), total_samp)
+        length = end_l - start_samp
         if length > 0:
-            stereo[start_samp:end, 0] += tone[:length] * l_g
-            stereo[start_samp:end, 1] += tone[:length] * r_g
+            stereo[start_samp:end_l, 0] += l_tone[:length] * l_g
+            stereo[start_samp:end_l, 1] += r_tone[:length] * r_g
 
     out = freeverb(stereo, room_size=reverb_room, damping=reverb_damping,
                    wet=reverb_wet, width=reverb_width, shimmer=shimmer)

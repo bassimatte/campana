@@ -7,6 +7,7 @@ Launch: python main.py --gui
 
 import asyncio
 import io
+import json
 import logging
 import threading
 import traceback
@@ -24,7 +25,7 @@ except ImportError:
         "Install with: pip install fastapi uvicorn[standard]"
     )
 
-from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events, _LOOKAHEAD_BEATS
+from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events, _LOOKAHEAD_BEATS, note_freq, transpose_note
 from .presets import PRESETS, KEYS, SCALES
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -35,12 +36,13 @@ app = FastAPI(title="Bells Generator", version="1.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://bassimatte.github.io",   # GitHub Pages
-        "http://localhost:8081",           # local dev
+        "https://bassimatte.github.io",
+        "http://localhost:8081",
         "http://127.0.0.1:8081",
     ],
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
+    expose_headers=["X-Events"],
 )
 
 _EPOCH_BEATS = 16.0   # generate notes in independent 16-beat windows → truly infinite
@@ -132,7 +134,25 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
         shimmer            = p["shimmer"],
         scale_mode         = p["scale_mode"],
     )
-    return stereo_to_wav_bytes(audio)
+
+    wav = stereo_to_wav_bytes(audio)
+
+    # Build note-event list for the visualiser (events in [0, chunk_beats) window only)
+    beat_dur  = 60.0 / p["bpm"]
+    key_shift = KEYS.get(p["key"], 0) + p["base_octave_shift"] * 12
+    viz_evts  = []
+    for b, n, d, v in all_events:
+        rel = b - raw_offset
+        if 0.0 <= rel < chunk_beats:
+            try:
+                t_note = transpose_note(n, key_shift)
+                f      = round(note_freq(t_note), 1)
+            except Exception:
+                f = 440.0
+            viz_evts.append({"t": round(rel * beat_dur, 3), "f": f, "v": round(float(v), 2)})
+
+    return Response(content=wav, media_type="audio/wav",
+                    headers={"X-Events": json.dumps(viz_evts)})
 
 
 def _do_full_render(p: dict) -> bytes:
@@ -216,12 +236,11 @@ async def preview_audio(request: Request):
     p           = _parse_render_params(body)
     chunk_beats = float(body.get("chunk_beats", 12))
     try:
-        wav = await asyncio.to_thread(_do_preview, p, body, chunk_beats)
+        return await asyncio.to_thread(_do_preview, p, body, chunk_beats)
     except Exception:
         tb = traceback.format_exc()
         logging.error("preview error:\n%s\nparams: %s", tb, p)
         return JSONResponse({"detail": tb}, status_code=500)
-    return Response(content=wav, media_type="audio/wav")
 
 
 @app.post("/api/render")

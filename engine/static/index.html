@@ -100,7 +100,7 @@
     .viz {
       position: relative;
       background: var(--viz-bg);
-      height: 88px;
+      height: 140px;
       border-bottom: 1px solid var(--card-border);
     }
     .viz canvas { display: block; width: 100%; height: 100%; }
@@ -728,6 +728,7 @@ async function sleepUntil(targetTime, token) {
 const canvas = $('viz');
 const ctx2   = canvas.getContext('2d');
 let wPhase   = 0;
+let pendingNotes = [];   // [{at: audioCtx time, freq, vel}]
 
 function resizeCanvas() {
   canvas.width  = canvas.offsetWidth  * (devicePixelRatio || 1);
@@ -739,24 +740,67 @@ resizeCanvas();
 function drawViz() {
   const w = canvas.width, h = canvas.height, dpr = devicePixelRatio || 1;
   ctx2.clearRect(0, 0, w, h);
-  const amp = isPlaying ? 0.32 : 0.04;
-  const spd = isPlaying ? 2.6 : 0.5;
+  const amp = isPlaying ? 0.18 : 0.04;
+  const spd = isPlaying ? 2.6  : 0.5;
   const cs  = getComputedStyle(document.documentElement);
+  const accent = cs.getPropertyValue('--accent').trim();
+
+  // Background sine waves (always present, subtler when playing)
   [
     [cs.getPropertyValue('--wave1').trim(), 1.0],
     [cs.getPropertyValue('--wave2').trim(), 0.6],
   ].forEach(([color, aScale], i) => {
     ctx2.beginPath();
     ctx2.strokeStyle = color;
-    ctx2.lineWidth   = (1.4 - i * 0.3) * dpr;
+    ctx2.lineWidth   = (1.2 - i * 0.3) * dpr;
     for (let x = 0; x <= w; x += 2) {
       const t = x / w;
-      const y = h/2 + Math.sin(t * Math.PI * (4 + i) * spd + wPhase * (i ? -0.8 : 1)) * amp * aScale * h;
+      const y = h * 0.72 + Math.sin(t * Math.PI * (4 + i) * spd + wPhase * (i ? -0.8 : 1)) * amp * aScale * h;
       x === 0 ? ctx2.moveTo(x, y) : ctx2.lineTo(x, y);
     }
     ctx2.stroke();
   });
   wPhase += isPlaying ? 0.04 : 0.005;
+
+  // Note dots — appear at scheduled audioCtx time, drift upward, fade with bell decay
+  if (audioCtx) {
+    const now = audioCtx.currentTime;
+    for (const ev of pendingNotes) {
+      const age = now - ev.at;
+      if (age < 0 || age > 6) continue;
+      const alpha = Math.max(0, 1 - age / 4.5);
+
+      // Y: log pitch → low notes near bottom, high notes near top
+      const midi  = Math.round(12 * Math.log2(ev.freq / 440) + 69);
+      const yNorm = Math.min(1, Math.max(0, (midi - 24) / 72));
+      const drift = age * 14 * dpr;
+      const y     = h * (0.82 - yNorm * 0.70) - drift;
+
+      // X: stable per-frequency (same pitch always in same column)
+      const x = ((ev.freq * 0.571 + 53) % 0.88) * w + w * 0.06;
+
+      const r = Math.max(2.5, ev.vel * 9) * dpr;
+
+      // Outer glow
+      ctx2.save();
+      ctx2.globalAlpha = alpha * 0.28;
+      ctx2.shadowBlur  = r * 4;  ctx2.shadowColor = accent;
+      ctx2.fillStyle   = accent;
+      ctx2.beginPath();  ctx2.arc(x, y, r * 2.4, 0, Math.PI * 2);  ctx2.fill();
+      ctx2.restore();
+
+      // Core dot
+      ctx2.save();
+      ctx2.globalAlpha = alpha;
+      ctx2.shadowBlur  = r * 2;  ctx2.shadowColor = accent;
+      ctx2.fillStyle   = accent;
+      ctx2.beginPath();  ctx2.arc(x, y, r, 0, Math.PI * 2);  ctx2.fill();
+      ctx2.restore();
+    }
+    // Prune events older than 7 s
+    pendingNotes = pendingNotes.filter(e => now - e.at < 7);
+  }
+
   requestAnimationFrame(drawViz);
 }
 drawViz();
@@ -821,26 +865,29 @@ async function fetchChunk(beatOffset, beats) {
   if (!resp.ok) {
     let detail = `Server error ${resp.status}`;
     try { const j = await resp.json(); detail = j.detail || detail; } catch(_) {}
-    throw new Error(detail.split('\n')[0]); // first line of traceback
+    throw new Error(detail.split('\n')[0]);
   }
-  return audioCtx.decodeAudioData(await resp.arrayBuffer());
+  // Parse note events for the visualiser
+  let events = [];
+  try { const hdr = resp.headers.get('X-Events'); if (hdr) events = JSON.parse(hdr); } catch(_) {}
+  const buf = await audioCtx.decodeAudioData(await resp.arrayBuffer());
+  return { buf, events };
 }
 
 // scheduleChunk: schedule buffer at startTime using musicBeats (not buffer.duration)
 // to compute the hand-off time. The reverb tail in the buffer keeps playing
 // naturally, overlapping with the next chunk for a continuous soundscape.
-function scheduleChunk(buffer, startTime, token, musicBeats) {
+function scheduleChunk(buffer, startTime, token, musicBeats, events = []) {
   const bpm      = parseInt($('bpmSelect').value);
-  const musicDur = musicBeats * 60.0 / bpm;          // actual notes window (s)
+  const musicDur = musicBeats * 60.0 / bpm;
   const fade     = Math.min(CROSSFADE, musicDur * 0.1);
-  const end      = startTime + buffer.duration;       // full buffer inc. reverb tail
-  const s0       = startTime + fade;                  // end of fade-in
+  const end      = startTime + buffer.duration;
+  const s0       = startTime + fade;
 
   const src  = audioCtx.createBufferSource();
   const gain = audioCtx.createGain();
 
   src.buffer = buffer; src.connect(gain); gain.connect(masterGain);
-  // Fade in only — the reverb tail decays to silence by itself.
   gain.gain.setValueAtTime(0, startTime);
   gain.gain.linearRampToValueAtTime(1, s0);
 
@@ -853,8 +900,11 @@ function scheduleChunk(buffer, startTime, token, musicBeats) {
   src.start(startTime);
   src.stop(end + 0.02);
 
-  // schedEnd is based on musical content, not buffer length —
-  // that's where the next chunk's fade-in should begin.
+  // Schedule visual note dots — each event fires at its absolute audioCtx time
+  for (const ev of events) {
+    pendingNotes.push({ at: startTime + ev.t, freq: ev.f, vel: ev.v });
+  }
+
   const schedEnd = startTime + musicDur - fade;
   return { endTime: end, fade, schedEnd };
 }
@@ -864,44 +914,38 @@ function scheduleChunk(buffer, startTime, token, musicBeats) {
 // when its fetch resolves — no busy-wait. Web Audio handles future startTimes.
 // beat_offset is tracked client-side and passed directly to the server so
 // the sequence is always contiguous (no skipped beats from index arithmetic).
-async function streamLoop(firstBuffer, token) {
-  // Schedule first (short) buffer — musicBeats = FIRST_BEATS
+async function streamLoop({buf: firstBuffer, events: firstEvents}, token) {
+  // Schedule first (short) buffer
   let schedEnd = audioCtx.currentTime + 0.05;
-  const s0 = scheduleChunk(firstBuffer, schedEnd, token, FIRST_BEATS);
-  schedEnd = s0.schedEnd;  // music-based hand-off time
+  const s0 = scheduleChunk(firstBuffer, schedEnd, token, FIRST_BEATS, firstEvents);
+  schedEnd = s0.schedEnd;
 
-  // Track the beat position after the first chunk
   let nextBeat = FIRST_BEATS;
 
-  // Kick off two fetches in parallel right away
-  let p1 = fetchChunk(nextBeat,               CHUNK_BEATS);
-  let p2 = fetchChunk(nextBeat + CHUNK_BEATS,  CHUNK_BEATS);
+  let p1 = fetchChunk(nextBeat,              CHUNK_BEATS);
+  let p2 = fetchChunk(nextBeat + CHUNK_BEATS, CHUNK_BEATS);
   nextBeat += CHUNK_BEATS * 2;
 
   while (isPlaying && token === playToken) {
-    // Await the earlier-started fetch
-    let buf;
+    let chunk;
     try {
-      buf = await p1;
+      chunk = await p1;
     } catch (e) {
       if (!isPlaying || token !== playToken) break;
       setStatus('Buffering…', 'loading');
-      try { buf = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS); } catch (_) {}
-      if (!buf) { await hardStop(); setStatus('Render error', ''); break; }
+      try { chunk = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS); } catch (_) {}
+      if (!chunk) { await hardStop(); setStatus('Render error', ''); break; }
     }
     if (!isPlaying || token !== playToken) break;
 
-    // Schedule immediately using music-based timing
-    const sched = scheduleChunk(buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token, CHUNK_BEATS);
+    const sched = scheduleChunk(chunk.buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token, CHUNK_BEATS, chunk.events);
     schedEnd = sched.schedEnd;
     setStatus('Playing', 'playing');
 
-    // Slide the prefetch window: p2 becomes p1, fire a new p2
     p1 = p2;
     p2 = fetchChunk(nextBeat, CHUNK_BEATS);
     nextBeat += CHUNK_BEATS;
 
-    // Sleep until 1.5 s before musical content ends — keeps exactly 2 fetches in-flight
     await sleepUntil(schedEnd - 1.5, token);
     if (!isPlaying || token !== playToken) break;
   }
@@ -946,10 +990,10 @@ async function startPlayback() {
   updatePlayBtn();
   setStatus('Generating first chunk…', 'loading');
   try {
-    const buf = await fetchChunk(0, FIRST_BEATS);
+    const first = await fetchChunk(0, FIRST_BEATS);
     if (token !== playToken) return;
     setStatus('Playing', 'playing');
-    streamLoop(buf, token).catch(async err => {
+    streamLoop(first, token).catch(async err => {
       if (token !== playToken) return;
       await hardStop(); setStatus('Error: ' + err.message, '');
     });
