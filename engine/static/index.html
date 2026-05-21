@@ -81,6 +81,10 @@
       font-size: 13px; font-weight: 600; letter-spacing: 0.22em;
       text-transform: uppercase; color: var(--accent);
     }
+    .app-byline {
+      font-size: 11px; font-weight: 400; letter-spacing: 0.04em;
+      text-transform: none; color: var(--muted); margin-left: 7px;
+    }
     .hdr-right { display: flex; align-items: center; gap: 8px; }
     .status-dot {
       width: 6px; height: 6px; border-radius: 50%;
@@ -278,7 +282,6 @@
       text-align: center;
       font-size: 11px; color: var(--muted); letter-spacing: 0.04em;
     }
-    .modal-foot strong { color: var(--accent); font-weight: 600; }
 
     /* ── Spacer between sections ── */
     .spacer { height: 16px; }
@@ -356,7 +359,7 @@
 
   <!-- Header -->
   <div class="hdr">
-    <span class="app-name">Campana</span>
+    <span class="app-name">Campana</span><span class="app-byline">by Matteo Bassi</span>
     <div class="hdr-right">
       <span class="status-dot" id="statusDot"></span>
       <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
@@ -630,9 +633,9 @@
       </ul>
 
       <h3>Architecture</h3>
-      <p>Audio is rendered server-side in Python (NumPy + SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API plays chunks gaplessly using a two-chunk prefetch strategy.</p>
+      <p>Audio is synthesised server-side in Python (NumPy/SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API schedules chunks gaplessly using a two-chunk prefetch buffer. Exports are rendered in 32-beat chunks through an async job queue, keeping peak memory under 250 MB regardless of duration.</p>
     </div>
-    <div class="modal-foot">Produced by <strong>Matteo Bassi</strong></div>
+    <div class="modal-foot">48 kHz · 16-bit stereo · generative · infinite</div>
   </div>
 </div>
 
