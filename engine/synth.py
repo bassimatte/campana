@@ -477,7 +477,7 @@ def generate_bell_events(scale_mode: str, total_beats: float,
     mel_w /= mel_w.sum()
 
     mel_size = len(melody_pool)
-    pos  = mel_size // 2          # start in the middle, not 1/3
+    pos  = int(rng.integers(0, mel_size))  # random start per epoch, not always middle
     beat = float(rng.uniform(0, max(0.01, sp_lo * 0.5)))
     while beat < total_beats:
         pos  = walk_step(rng, pos, mel_size, mel_steps, mel_w)
@@ -497,7 +497,7 @@ def generate_bell_events(scale_mode: str, total_beats: float,
         bas_w     = np.array([1.0, 2.0, 2.0, 1.0])
         bas_w    /= bas_w.sum()
         bas_size  = len(bass_pool)
-        pos2  = bas_size // 2
+        pos2  = int(rng.integers(0, bas_size))  # random start per epoch
         beat2 = float(rng.uniform(0, sp_lo2))
         while beat2 < total_beats:
             pos2  = walk_step(rng, pos2, bas_size, bas_steps, bas_w, leap_prob=0.08)
