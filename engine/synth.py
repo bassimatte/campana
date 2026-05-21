@@ -254,8 +254,11 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
     mono = (stereo[:, 0] + stereo[:, 1]) * 0.5
 
     def _channel(spread: float) -> np.ndarray:
-        combs = [_fast_comb(mono, d + spread, gain) for d in _FV_COMB_MS]
-        rev   = sum(combs) * (1.0 / len(combs))
+        # Accumulate combs one at a time to avoid holding 8×45 MB simultaneously
+        rev = np.zeros(len(mono), dtype=np.float64)
+        for d in _FV_COMB_MS:
+            rev += _fast_comb(mono, d + spread, gain)
+        rev *= (1.0 / len(_FV_COMB_MS))
         # Post-comb damping (one-pole LP approximates in-loop damping)
         if damping > 0.01:
             lp_b = np.array([1.0 - damping])
@@ -267,6 +270,7 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
 
     rev_l = _channel(0.0)
     rev_r = _channel(_FV_SPREAD_MS)
+    del mono   # free before building output
 
     # Shimmer: add octave-up pitch-shifted version of the reverb wet signal.
     # resample_poly(x, 1, 2) → half the sample count = one octave higher pitch.
@@ -279,16 +283,33 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
         n_sh = min(len(sh_l), n)
         buf_l = np.zeros(n); buf_l[:n_sh] = sh_l[:n_sh]
         buf_r = np.zeros(n); buf_r[:n_sh] = sh_r[:n_sh]
+        del sh_l, sh_r
         rev_l = rev_l + buf_l * (shimmer * 0.45)
         rev_r = rev_r + buf_r * (shimmer * 0.45)
+        del buf_l, buf_r
 
+    # Build output in a pre-allocated array using in-place ops to minimise
+    # peak memory — avoids materialising out_l and out_r as separate arrays
+    # while column_stack output and stereo are all simultaneously live.
+    n     = len(rev_l)
+    dry   = 1.0 - wet
     w2    = width / 2.0
-    out_l = rev_l * (0.5 + w2) + rev_r * (0.5 - w2)
-    out_r = rev_r * (0.5 + w2) + rev_l * (0.5 - w2)
+    out   = np.empty((n, 2), dtype=np.float64)
 
-    dry = 1.0 - wet
-    return np.column_stack([stereo[:, 0] * dry + out_l * wet,
-                            stereo[:, 1] * dry + out_r * wet])
+    # out[:,0] = (rev_l*(0.5+w2) + rev_r*(0.5-w2))*wet + stereo[:,0]*dry
+    np.multiply(rev_l, 0.5 + w2, out=out[:, 0])
+    out[:, 0] += rev_r * (0.5 - w2)
+    out[:, 0] *= wet
+    out[:, 0] += stereo[:, 0] * dry
+
+    # out[:,1] = (rev_r*(0.5+w2) + rev_l*(0.5-w2))*wet + stereo[:,1]*dry
+    np.multiply(rev_r, 0.5 + w2, out=out[:, 1])
+    out[:, 1] += rev_l * (0.5 - w2)
+    del rev_l, rev_r   # free 2×45 MB before the last addition
+    out[:, 1] *= wet
+    out[:, 1] += stereo[:, 1] * dry
+
+    return out
 
 
 # ── Stereo delay ──────────────────────────────────────────────────────────────
@@ -370,7 +391,7 @@ def render_track(events: list, total_beats: float,
     """Render events to a stereo float64 array with global Freeverb + Delay."""
     beat_dur     = 60.0 / bpm
     total_samp   = int(total_beats * beat_dur * SAMPLE_RATE) + SAMPLE_RATE * 6
-    stereo       = np.zeros((total_samp, 2), dtype=np.float64)
+    stereo       = np.zeros((total_samp, 2), dtype=np.float32)
     rng          = np.random.default_rng(42)
 
     events = transpose_events(events, key_semitones + base_octave_shift * 12)
