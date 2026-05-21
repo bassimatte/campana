@@ -9,6 +9,7 @@ import asyncio
 import io
 import json
 import logging
+import struct
 import threading
 import traceback
 import uuid
@@ -26,6 +27,7 @@ except ImportError:
         "Install with: pip install fastapi uvicorn[standard]"
     )
 
+import numpy as np
 from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events, _LOOKAHEAD_BEATS, note_freq, transpose_note
 from .presets import PRESETS, KEYS, SCALES
 
@@ -161,42 +163,112 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
 
 
 def _do_full_render(p: dict) -> bytes:
+    """Render export in 32-beat chunks so peak memory stays ~150 MB regardless
+    of duration.  The first chunk calibrates the amplitude scale; all subsequent
+    chunks use the same scale so level is consistent throughout the file."""
+    from .synth import SAMPLE_RATE, render_chunk as _rc
+
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
-    export_beats  = float(preset["total_beats"])   # use preset duration for export length
-    all_events    = [e for e in _epoch_events(
+    export_beats  = float(preset["total_beats"])
+    bpm           = p["bpm"]
+    beat_dur      = 60.0 / bpm
+
+    CHUNK_BEATS   = 32.0
+
+    all_events = [e for e in _epoch_events(
         p["scale_mode"],
         preset.get("gen_params", {}),
         p["seed_base"],
         start_beat = 0,
         end_beat   = export_beats,
     ) if e[0] < export_beats]
-    audio = render_track(
-        all_events,
-        total_beats        = preset["total_beats"],
-        bpm                = p["bpm"],
-        reverb_room        = p["reverb_room"],
-        reverb_damping     = p.get("reverb_damping", 0.4),
-        reverb_width       = p.get("reverb_width", 0.8),
-        reverb_wet         = p.get("reverb_wet", 0.35),
-        decay_mult         = p["decay_mult"],
-        key_semitones      = key_semitones,
-        octave_spread      = p.get("octave_spread", 0.0),
-        base_octave_shift  = p.get("base_octave_shift", 0),
-        humanize           = p.get("humanize", 0.0),
-        density            = p.get("density", 1.0),
-        texture            = p.get("texture", "tubular"),
-        attack_ms          = p.get("attack_ms", 0.0),
-        beating            = p.get("beating", 0.0),
-        strike_level       = p.get("strike_level", 0.0),
-        delay_time         = p.get("delay_time", 300.0),
-        delay_feedback     = p.get("delay_feedback", 0.35),
-        delay_wet          = p.get("delay_wet", 0.0),
-        time_scatter       = p.get("time_scatter", 0.0),
-        shimmer            = p.get("shimmer", 0.0),
-        scale_mode         = p.get("scale_mode", "minor"),
+
+    ckw = dict(
+        total_beats       = 999_999,
+        bpm               = bpm,
+        reverb_room       = p["reverb_room"],
+        reverb_damping    = p.get("reverb_damping", 0.4),
+        reverb_width      = p.get("reverb_width", 0.8),
+        reverb_wet        = p.get("reverb_wet", 0.35),
+        decay_mult        = p["decay_mult"],
+        key_semitones     = key_semitones,
+        octave_spread     = p.get("octave_spread", 0.0),
+        base_octave_shift = p.get("base_octave_shift", 0),
+        humanize          = p.get("humanize", 0.0),
+        density           = p.get("density", 1.0),
+        texture           = p.get("texture", "tubular"),
+        attack_ms         = p.get("attack_ms", 0.0),
+        beating           = p.get("beating", 0.0),
+        strike_level      = p.get("strike_level", 0.0),
+        seed              = p["seed_base"],
+        delay_time        = p.get("delay_time", 300.0),
+        delay_feedback    = p.get("delay_feedback", 0.35),
+        delay_wet         = p.get("delay_wet", 0.0),
+        time_scatter      = p.get("time_scatter", 0.0),
+        shimmer           = p.get("shimmer", 0.0),
+        scale_mode        = p.get("scale_mode", "minor"),
     )
-    return stereo_to_wav_bytes(audio)
+
+    # ── Pre-compute total WAV size for a correct header ────────────────────────
+    tail_s       = 4.5 * max(p.get("decay_mult", 1.0), 1.0)
+    total_secs   = export_beats * beat_dur + tail_s
+    total_frames = int(total_secs * SAMPLE_RATE)
+    CH, SW       = 2, 2       # stereo, 16-bit
+    data_bytes   = total_frames * CH * SW
+
+    buf = io.BytesIO()
+    # WAV header (44 bytes)
+    buf.write(b"RIFF")
+    buf.write(struct.pack("<I", 36 + data_bytes))
+    buf.write(b"WAVE")
+    buf.write(b"fmt ")
+    buf.write(struct.pack("<I", 16))
+    buf.write(struct.pack("<H", 1))           # PCM
+    buf.write(struct.pack("<H", CH))
+    buf.write(struct.pack("<I", SAMPLE_RATE))
+    buf.write(struct.pack("<I", SAMPLE_RATE * CH * SW))
+    buf.write(struct.pack("<H", CH * SW))
+    buf.write(struct.pack("<H", SW * 8))
+    buf.write(b"data")
+    buf.write(struct.pack("<I", data_bytes))
+
+    scale         = None   # calibrated from first chunk, reused for all
+    frames_left   = total_frames
+    beat_offset   = 0.0
+
+    while beat_offset < export_beats and frames_left > 0:
+        this_chunk = min(CHUNK_BEATS, export_beats - beat_offset)
+        is_last    = (beat_offset + this_chunk >= export_beats)
+
+        audio = _rc(all_events, beat_offset, this_chunk, **ckw)
+
+        if not is_last:
+            # Keep only the music window; discard per-chunk reverb tail to
+            # avoid a "reverb restart" hiccup at the next chunk boundary.
+            music_samp = int(this_chunk * beat_dur * SAMPLE_RATE)
+            audio      = audio[:music_samp]
+
+        # Calibrate loudness from first chunk, clip subsequent chunks to that scale
+        peak = float(np.max(np.abs(audio)))
+        if scale is None:
+            scale = (0.80 / peak) if peak > 1e-9 else 1.0
+
+        pcm = (np.clip(audio * scale, -1.0, 1.0) * 32767).astype(np.int16)
+        del audio
+
+        frames_to_write = min(len(pcm), frames_left)
+        buf.write(pcm[:frames_to_write].flatten(order="C").tobytes())
+        frames_left -= frames_to_write
+        del pcm
+
+        beat_offset += this_chunk
+
+    # Zero-pad if the last chunk was shorter than expected
+    if frames_left > 0:
+        buf.write(b"\x00" * frames_left * CH * SW)
+
+    return buf.getvalue()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
