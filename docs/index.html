@@ -332,6 +332,14 @@
     }
     .btn-export:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
     .btn-export:disabled { opacity: 0.38; cursor: not-allowed; }
+    .export-dur {
+      height: 38px; padding: 0 10px; border-radius: 100px;
+      border: 1.5px solid var(--card-border); background: transparent;
+      color: var(--muted); font-family: inherit; font-size: 12px;
+      cursor: pointer; outline: none; appearance: none; -webkit-appearance: none;
+      transition: all 0.15s;
+    }
+    .export-dur:hover, .export-dur:focus { border-color: var(--accent-mid); color: var(--accent); }
   </style>
 </head>
 <body>
@@ -542,6 +550,12 @@
       </svg>
       Export
     </button>
+    <select class="export-dur" id="exportDur" title="Export duration">
+      <option value="1">1 min</option>
+      <option value="2">2 min</option>
+      <option value="5" selected>5 min</option>
+      <option value="10">10 min</option>
+    </select>
   </div>
 
 </div><!-- /shell -->
@@ -860,7 +874,7 @@ async function ensureAudio() {
 }
 
 async function fetchChunk(beatOffset, beats) {
-  const resp = await fetch(apiUrl('/api/preview'), {
+  const resp = await fetch('/api/preview', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({ ...getParams(), beat_offset: beatOffset, chunk_beats: beats }),
@@ -1013,13 +1027,14 @@ async function togglePlay() {
 
 // ── Export ─────────────────────────────────────────────────────────────────
 async function exportWav() {
-  $('exportBtn').disabled = true;
+  const minutes = parseFloat($('exportDur').value) || 5;
+  $('exportBtn').disabled = true; $('exportDur').disabled = true;
   setStatus('Starting render…', 'loading');
   try {
     // 1. Start background render job — returns immediately with job_id
     const startR = await fetch(apiUrl('/api/render'), {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify(getParams()),
+      body: JSON.stringify({ ...getParams(), export_minutes: minutes }),
     });
     if (!startR.ok) {
       const txt = await startR.text().catch(() => startR.status);
@@ -1027,14 +1042,14 @@ async function exportWav() {
     }
     const { job_id } = await startR.json();
 
-    // 2. Poll until done (check every 2 s, give up after 3 min)
-    const deadline = Date.now() + 180_000;
+    // 2. Poll until done — deadline scales with duration
+    const deadline = Date.now() + Math.max(180_000, minutes * 60_000 * 3);
     let status = 'pending', elapsed = 0;
     while (status === 'pending') {
       await sleep(2000);
       elapsed += 2;
-      setStatus(`Rendering WAV… (${elapsed}s)`, 'loading');
-      if (Date.now() > deadline) throw new Error('timed out after 3 minutes');
+      setStatus(`Rendering ${minutes} min WAV… (${elapsed}s)`, 'loading');
+      if (Date.now() > deadline) throw new Error('timed out');
       const sr = await fetch(apiUrl(`/api/render/${job_id}`));
       const sj = await sr.json();
       status = sj.status;
@@ -1052,7 +1067,7 @@ async function exportWav() {
   } catch (e) {
     setStatus('Export error: ' + e.message, '');
   }
-  $('exportBtn').disabled = false;
+  $('exportBtn').disabled = false; $('exportDur').disabled = false;
 }
 
 // ── Preset & key data (already in HTML; JS just needs the defaults) ─────────

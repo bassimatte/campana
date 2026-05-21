@@ -170,7 +170,9 @@ def _do_full_render(p: dict) -> bytes:
 
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
-    export_beats  = float(preset["total_beats"])
+    # export_beats set by the caller from user-selected duration;
+    # fall back to preset default if called without it.
+    export_beats  = float(p.get("export_beats") or preset["total_beats"])
     bpm           = p["bpm"]
     beat_dur      = 60.0 / bpm
 
@@ -323,10 +325,12 @@ async def preview_audio(request: Request):
 @app.post("/api/render")
 async def start_render(request: Request):
     """Start a background render job. Returns {job_id} immediately."""
-    body  = await request.json()
-    p     = _parse_render_params(body)
-    name  = (PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values())))["name"]
-    fname = name.replace(" ", "_") + ".wav"
+    body    = await request.json()
+    p       = _parse_render_params(body)
+    minutes = float(body.get("export_minutes", 5))
+    p["export_beats"] = minutes * p["bpm"]   # convert user minutes → beats
+    name    = (PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values())))["name"]
+    fname   = name.replace(" ", "_") + ".wav"
 
     job_id = uuid.uuid4().hex[:10]
     # Evict oldest job if at capacity
