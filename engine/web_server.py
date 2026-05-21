@@ -72,12 +72,12 @@ def _parse_render_params(body: dict) -> dict:
     )
 
 
-def _do_preview(p: dict, chunk_index: int, chunk_beats: float) -> bytes:
+def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
     all_events    = preset["melody"] + preset["bass"]
     total_beats   = float(preset["total_beats"])
-    beat_offset   = (chunk_index * chunk_beats) % total_beats
+    beat_offset   = float(body.get("beat_offset", 0.0)) % total_beats
 
     audio = render_chunk(
         all_events,
@@ -99,7 +99,7 @@ def _do_preview(p: dict, chunk_index: int, chunk_beats: float) -> bytes:
         attack_ms          = p["attack_ms"],
         beating            = p["beating"],
         strike_level       = p["strike_level"],
-        seed               = 42 + chunk_index * 137,
+        seed               = 42 + int(beat_offset) * 137,
         delay_time         = p["delay_time"],
         delay_feedback     = p["delay_feedback"],
         delay_wet          = p["delay_wet"],
@@ -182,10 +182,9 @@ def list_keys():
 async def preview_audio(request: Request):
     body        = await request.json()
     p           = _parse_render_params(body)
-    chunk_index = int(body.get("chunk_index", 0))
     chunk_beats = float(body.get("chunk_beats", 12))
     try:
-        wav = await asyncio.to_thread(_do_preview, p, chunk_index, chunk_beats)
+        wav = await asyncio.to_thread(_do_preview, p, body, chunk_beats)
     except Exception:
         tb = traceback.format_exc()
         logging.error("preview error:\n%s\nparams: %s", tb, p)

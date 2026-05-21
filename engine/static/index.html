@@ -771,11 +771,11 @@ async function ensureAudio() {
   if (audioCtx.state === 'suspended') await audioCtx.resume();
 }
 
-async function fetchChunk(idx, beats) {
+async function fetchChunk(beatOffset, beats) {
   const resp = await fetch('/api/preview', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ ...getParams(), chunk_index: idx, chunk_beats: beats }),
+    body:    JSON.stringify({ ...getParams(), beat_offset: beatOffset, chunk_beats: beats }),
   });
   if (!resp.ok) {
     let detail = `Server error ${resp.status}`;
@@ -813,17 +813,21 @@ function scheduleChunk(buffer, startTime, token) {
 // ── Streaming loop — schedule-ahead strategy ─────────────────────────────
 // Keep 2 fetches in-flight at all times. Schedule each chunk immediately
 // when its fetch resolves — no busy-wait. Web Audio handles future startTimes.
+// beat_offset is tracked client-side and passed directly to the server so
+// the sequence is always contiguous (no skipped beats from index arithmetic).
 async function streamLoop(firstBuffer, token) {
   // Schedule first (short) buffer
   let schedEnd = audioCtx.currentTime + 0.05;
   const s0 = scheduleChunk(firstBuffer, schedEnd, token);
   schedEnd = s0.endTime - s0.fade;
-  chunkIdx++;
+
+  // Track the beat position after the first chunk
+  let nextBeat = FIRST_BEATS;
 
   // Kick off two fetches in parallel right away
-  let p1 = fetchChunk(chunkIdx,     CHUNK_BEATS);
-  let p2 = fetchChunk(chunkIdx + 1, CHUNK_BEATS);
-  chunkIdx += 2;
+  let p1 = fetchChunk(nextBeat,               CHUNK_BEATS);
+  let p2 = fetchChunk(nextBeat + CHUNK_BEATS,  CHUNK_BEATS);
+  nextBeat += CHUNK_BEATS * 2;
 
   while (isPlaying && token === playToken) {
     // Await the earlier-started fetch
@@ -833,7 +837,7 @@ async function streamLoop(firstBuffer, token) {
     } catch (e) {
       if (!isPlaying || token !== playToken) break;
       setStatus('Buffering…', 'loading');
-      try { buf = await fetchChunk(chunkIdx - 2, CHUNK_BEATS); } catch (_) {}
+      try { buf = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS); } catch (_) {}
       if (!buf) { await hardStop(); setStatus('Render error', ''); break; }
     }
     if (!isPlaying || token !== playToken) break;
@@ -845,8 +849,8 @@ async function streamLoop(firstBuffer, token) {
 
     // Slide the prefetch window: p2 becomes p1, fire a new p2
     p1 = p2;
-    p2 = fetchChunk(chunkIdx, CHUNK_BEATS);
-    chunkIdx++;
+    p2 = fetchChunk(nextBeat, CHUNK_BEATS);
+    nextBeat += CHUNK_BEATS;
 
     // Sleep until 1.5 s before the current chunk ends — give server ample time
     const napMs = Math.max(0, (schedEnd - audioCtx.currentTime - 1.5) * 1000);
@@ -879,7 +883,7 @@ async function stopPlayback() {
 
 async function startPlayback() {
   await ensureAudio();
-  const token = ++playToken; isPlaying = true; isDirty = false; chunkIdx = 0;
+  const token = ++playToken; isPlaying = true; isDirty = false;
   const now = audioCtx.currentTime;
   masterGain.gain.cancelScheduledValues(now);
   masterGain.gain.setValueAtTime(0, now);
