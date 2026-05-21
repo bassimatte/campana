@@ -24,7 +24,7 @@ except ImportError:
         "Install with: pip install fastapi uvicorn[standard]"
     )
 
-from .synth import render_chunk, render_track, stereo_to_wav_bytes
+from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events
 from .presets import PRESETS, KEYS, SCALES
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -69,15 +69,21 @@ def _parse_render_params(body: dict) -> dict:
         time_scatter     = float(body.get("time_scatter", 0.0)),
         shimmer          = float(body.get("shimmer", 0.0)),
         scale_mode       = str(body.get("scale_mode", "minor")),
+        seed_base        = int(body.get("seed_base", 42)),
     )
 
 
 def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
-    all_events    = preset["melody"] + preset["bass"]
     total_beats   = float(preset["total_beats"])
     beat_offset   = float(body.get("beat_offset", 0.0)) % total_beats
+
+    # Generate a fresh melody for this cycle using the cycle seed
+    cycle_num   = int(float(body.get("beat_offset", 0.0)) // total_beats) if total_beats > 0 else 0
+    cycle_seed  = p["seed_base"] + cycle_num * 999
+    all_events  = generate_bell_events(p["scale_mode"], total_beats,
+                                       preset.get("gen_params", {}), cycle_seed)
 
     audio = render_chunk(
         all_events,
@@ -113,7 +119,8 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
 def _do_full_render(p: dict) -> bytes:
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
     key_semitones = KEYS.get(p["key"], 0)
-    all_events    = preset["melody"] + preset["bass"]
+    all_events    = generate_bell_events(p["scale_mode"], preset["total_beats"],
+                                         preset.get("gen_params", {}), p["seed_base"])
     audio = render_track(
         all_events,
         total_beats        = preset["total_beats"],

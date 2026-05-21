@@ -407,6 +407,91 @@ def render_track(events: list, total_beats: float,
     return apply_delay(out, delay_ms=delay_time, feedback=delay_feedback, wet=delay_wet)
 
 
+# ── Generative melody engine ──────────────────────────────────────────────────
+
+def generate_bell_events(scale_mode: str, total_beats: float,
+                         gen_params: dict, seed: int) -> list:
+    """Procedurally generate one loop-cycle of bell events.
+
+    Notes are produced in C (key_semitones=0) so that render_chunk's
+    existing transpose_events() call moves them into the user's chosen key.
+
+    gen_params keys:
+      melody_octaves       list of MIDI octave numbers for the melody voice
+      bass_octaves         list of MIDI octave numbers for the bass voice
+      note_spacing_range   (lo, hi) beats between successive melody strikes
+      bass_spacing_range   (lo, hi) beats between successive bass strikes
+      velocity_base        base velocity for melody (0-1)
+      bass_velocity_base   base velocity for bass (0-1)
+      walk_bias            -1 descending / 0 neutral / 1 ascending
+      bass_enabled         bool
+    """
+    rng     = np.random.default_rng(seed)
+    degrees = SCALES.get(scale_mode, SCALES["minor"])
+
+    def build_pool(octaves):
+        pool = []
+        for oct in octaves:
+            for d in degrees:
+                pool.append((oct + 1) * 12 + d)   # root = C
+        return sorted(set(pool))
+
+    def midi_to_name(midi: int) -> str:
+        midi = int(np.clip(midi, 12, 107))
+        return _NOTE_NAMES[midi % 12] + str(midi // 12 - 1)
+
+    melody_pool = build_pool(gen_params.get("melody_octaves", [3, 4, 5]))
+    bass_pool   = build_pool(gen_params.get("bass_octaves",   [1, 2]))
+
+    events: list = []
+
+    # ── Melody voice ──────────────────────────────────────────────────────────
+    sp_lo, sp_hi = gen_params.get("note_spacing_range", (0.75, 2.0))
+    vel_base     = gen_params.get("velocity_base", 0.65)
+    bias         = gen_params.get("walk_bias", 0)
+
+    steps = np.array([-2, -1, 0, 1, 2])
+    if bias > 0:
+        w = np.array([1.0, 2.0, 3.0, 4.0, 2.0])
+    elif bias < 0:
+        w = np.array([2.0, 4.0, 3.0, 2.0, 1.0])
+    else:
+        w = np.array([2.0, 3.0, 3.0, 3.0, 2.0])
+    w /= w.sum()
+
+    pos  = len(melody_pool) // 3
+    beat = float(rng.uniform(0, max(0.01, sp_lo * 0.5)))
+    while beat < total_beats:
+        step = int(rng.choice(steps, p=w))
+        pos  = int(np.clip(pos + step, 0, len(melody_pool) - 1))
+        note = midi_to_name(melody_pool[pos])
+        vel  = float(np.clip(
+            vel_base + 0.3 * (pos / max(1, len(melody_pool) - 1)) + rng.uniform(-0.08, 0.08),
+            0.15, 1.0))
+        dur  = float(rng.choice([0.5, 0.5, 1.0, 1.0, 2.0]))
+        events.append((beat, note, dur, vel))
+        beat += float(rng.uniform(sp_lo, sp_hi))
+
+    # ── Bass voice ────────────────────────────────────────────────────────────
+    if gen_params.get("bass_enabled", True) and bass_pool:
+        sp_lo2, sp_hi2 = gen_params.get("bass_spacing_range", (2.0, 5.0))
+        vel_b2         = gen_params.get("bass_velocity_base", 0.50)
+        pos2  = len(bass_pool) // 2
+        beat2 = float(rng.uniform(0, sp_lo2))
+        while beat2 < total_beats:
+            pos2  = int(np.clip(
+                pos2 + int(rng.choice([-1, 0, 0, 1])), 0, len(bass_pool) - 1))
+            note2 = midi_to_name(bass_pool[pos2])
+            vel2  = float(np.clip(
+                vel_b2 + 0.2 * (pos2 / max(1, len(bass_pool) - 1)) + rng.uniform(-0.05, 0.05),
+                0.10, 0.80))
+            dur2  = float(rng.choice([1.0, 2.0, 2.0, 4.0]))
+            events.append((beat2, note2, dur2, vel2))
+            beat2 += float(rng.uniform(sp_lo2, sp_hi2))
+
+    return sorted(events, key=lambda e: e[0])
+
+
 _LOOKAHEAD_BEATS = 8.0  # look back this many beats for reverb tails (gapless looping)
 
 
