@@ -1,14 +1,16 @@
 """
-main.py — Bells Generator
--------------------------
-Additive synthesis bell sequencer in C minor.
+main.py — Campana
+-----------------
+Generative bell synthesizer.
 
 Usage:
-    python main.py                          # render default preset to WAV
-    python main.py --list                   # list available presets
-    python main.py --preset melodic_ascending
-    python main.py --key "D minor" --bpm 72
-    python main.py --gui                    # launch web UI
+    python main.py --list                          # list presets
+    python main.py                                 # export default preset (sera, 2 min)
+    python main.py --preset tempio                 # export one preset
+    python main.py --preset sera --minutes 5       # 5-minute export
+    python main.py --all                           # export all presets
+    python main.py --all --minutes 2               # all presets, 2 min each
+    python main.py --gui                           # launch web UI
 """
 
 import argparse
@@ -21,58 +23,69 @@ EXPORT_DIR.mkdir(exist_ok=True)
 
 def list_presets():
     from engine.presets import PRESETS
-    print(f"{'ID':<22} {'Name':<26} BPM   Reverb  Decay")
-    print("─" * 72)
+    print(f"{'ID':<16} {'Name':<16} BPM   Key        Scale")
+    print("─" * 60)
     for pid, p in PRESETS.items():
-        print(f"{pid:<22} {p['name']:<26} {p['default_bpm']:<6}"
-              f"{p['default_reverb']:<8.2f}{p['default_decay']:.1f}×")
+        print(f"{pid:<16} {p['name']:<16} {p['default_bpm']:<6}"
+              f"{p.get('default_key','C'):<11}{p.get('default_scale_mode','minor')}")
     print(f"\n{len(PRESETS)} preset(s).")
 
 
-def render(preset_id: str, bpm: float, key: str,
-           reverb_room: float, decay_mult: float, output: Path):
-    from engine.synth import render_track, stereo_to_wav_bytes
-    from engine.presets import PRESETS, KEYS
+def render_preset(preset_id: str, minutes: float, output: Path):
+    from engine.web_server import _do_full_render, _parse_render_params
+    from engine.presets import PRESETS
 
     preset = PRESETS.get(preset_id)
     if preset is None:
         sys.exit(f"Unknown preset '{preset_id}'. Use --list to see options.")
 
-    key_semitones = KEYS.get(key, 0)
-    all_events    = preset["melody"] + preset["bass"]
+    p = _parse_render_params({
+        "preset":     preset_id,
+        "bpm":        preset["default_bpm"],
+        "key":        preset.get("default_key", "C"),
+        "reverb_room":      preset.get("default_reverb", 0.75),
+        "reverb_damping":   preset.get("default_reverb_damping", 0.4),
+        "reverb_width":     preset.get("default_reverb_width", 0.8),
+        "reverb_wet":       preset.get("default_reverb_wet", 0.35),
+        "decay_mult":       preset.get("default_decay", 1.4),
+        "texture":          preset.get("default_texture", "tubular"),
+        "beating":          preset.get("default_beating", 0.0),
+        "strike_level":     preset.get("default_strike", 0.0),
+        "attack_ms":        preset.get("default_attack_ms", 0.0),
+        "humanize":         preset.get("default_humanize", 0.0),
+        "density":          preset.get("default_density", 1.0),
+        "octave_spread":    preset.get("default_octave_spread", 0.0),
+        "base_octave_shift":preset.get("default_base_octave", 0),
+        "time_scatter":     preset.get("default_time_scatter", 0.0),
+        "delay_time":       preset.get("default_delay_time", 300),
+        "delay_feedback":   preset.get("default_delay_feedback", 0.35),
+        "delay_wet":        preset.get("default_delay_wet", 0.0),
+        "shimmer":          preset.get("default_shimmer", 0.0),
+        "scale_mode":       preset.get("default_scale_mode", "minor"),
+        "seed_base":        42,
+    })
+    p["export_beats"] = minutes * p["bpm"]
 
-    print(f"🔔 Rendering '{preset['name']}' | "
-          f"Key: {key} | BPM: {bpm} | Reverb: {reverb_room:.2f} | "
-          f"Decay: {decay_mult:.1f}×")
-
-    audio = render_track(
-        all_events,
-        total_beats   = preset["total_beats"],
-        bpm           = bpm,
-        reverb_room   = reverb_room,
-        decay_mult    = decay_mult,
-        key_semitones = key_semitones,
-    )
-    wav_bytes = stereo_to_wav_bytes(audio)
-    output.write_bytes(wav_bytes)
-    dur = len(audio) / 48_000
-    print(f"  ✓ Saved: {output}  ({dur:.1f}s)")
+    print(f"  🔔 {preset['name']:<14} {minutes:.0f} min @ {p['bpm']} BPM …", end="", flush=True)
+    wav = _do_full_render(p)
+    output.write_bytes(wav)
+    dur = len(wav) / (48_000 * 2 * 2)  # bytes / (sr * channels * bytes_per_sample)
+    print(f"  {dur/60:.1f} min  →  {output}  ({len(wav)/1e6:.1f} MB)")
 
 
 def main():
-    from engine.presets import PRESETS, KEYS
+    from engine.presets import PRESETS
 
-    parser = argparse.ArgumentParser(description="Bells Generator — Melodic bell synthesiser")
+    parser = argparse.ArgumentParser(description="Campana — generative bell synthesizer")
     parser.add_argument("--gui",     action="store_true", help="Launch web UI")
     parser.add_argument("--list",    action="store_true", help="List presets")
+    parser.add_argument("--all",     action="store_true", help="Export all presets")
     parser.add_argument("--preset",  default="sera",
-                        choices=list(PRESETS.keys()), help="Preset to render")
-    parser.add_argument("--key",     default=None,
-                        choices=list(KEYS.keys()), help="Musical key (default: preset default)")
-    parser.add_argument("--bpm",     type=float, default=None, help="Beats per minute")
-    parser.add_argument("--reverb",  type=float, default=None, help="Reverb room size 0–1")
-    parser.add_argument("--decay",   type=float, default=None, help="Bell decay multiplier")
-    parser.add_argument("--output",  type=Path,  default=None, help="Output WAV path")
+                        choices=list(PRESETS.keys()), help="Preset ID (default: sera)")
+    parser.add_argument("--minutes", type=float, default=2.0,
+                        help="Export duration in minutes (default: 2)")
+    parser.add_argument("--output",  type=Path, default=None,
+                        help="Output WAV path (single preset only)")
     args = parser.parse_args()
 
     if args.list:
@@ -87,14 +100,14 @@ def main():
         launch_gui()
         return
 
-    preset = PRESETS[args.preset]
-    bpm         = args.bpm    or preset["default_bpm"]
-    key         = args.key    or "C minor"
-    reverb_room = args.reverb if args.reverb is not None else preset["default_reverb"]
-    decay_mult  = args.decay  if args.decay  is not None else preset["default_decay"]
-    output      = args.output or EXPORT_DIR / f"{args.preset}.wav"
-
-    render(args.preset, bpm, key, reverb_room, decay_mult, output)
+    if args.all:
+        print(f"Exporting all {len(PRESETS)} presets ({args.minutes:.0f} min each) → {EXPORT_DIR}/\n")
+        for pid in PRESETS:
+            render_preset(pid, args.minutes, EXPORT_DIR / f"{pid}.wav")
+        print("\nDone.")
+    else:
+        output = args.output or EXPORT_DIR / f"{args.preset}.wav"
+        render_preset(args.preset, args.minutes, output)
 
 
 if __name__ == "__main__":
