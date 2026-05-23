@@ -2,6 +2,8 @@
 
 A browser-based bell synthesizer with additive synthesis, Freeverb reverb, stereo delay, and gapless streaming.
 
+![Campana UI](screenshots/main%20ui.png)
+
 ## Features
 - 4 bell textures: Tubular, Church, Singing Bowl, Crystal
 - Freeverb global reverb (8 comb + 4 allpass)
