@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
@@ -93,12 +93,7 @@
     .status-dot.playing { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .status-dot.loading { background: var(--accent); animation: pulse 0.9s ease-in-out infinite; }
     @keyframes pulse { 0%,100%{opacity:.4} 50%{opacity:1} }
-    .theme-btn {
-      width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--card-border);
-      background: var(--seg-bg); cursor: pointer; font-size: 13px;
-      display: grid; place-items: center; transition: transform 0.2s;
-    }
-    .theme-btn:hover { transform: scale(1.1); }
+    .theme-btn { display: none; } /* legacy — theme now in settings */
 
     /* ── Viz ── */
     .viz {
@@ -364,16 +359,50 @@
     .settings-section h3 { font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
       text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
     .settings-row { display: flex; align-items: center; justify-content: space-between;
-      gap: 12px; }
-    .settings-label { font-size: 13px; color: var(--fg); }
-    .settings-select {
-      height: 34px; padding: 0 10px; border-radius: 8px;
-      border: 1.5px solid var(--card-border); background: var(--seg-bg);
-      color: var(--fg); font-family: inherit; font-size: 13px;
-      cursor: pointer; outline: none; appearance: none; -webkit-appearance: none;
-      min-width: 90px; text-align: right; transition: all 0.15s;
+      gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--subtle); }
+    .settings-row:last-child { border-bottom: none; padding-bottom: 0; }
+    .settings-label { font-size: 13px; color: var(--text); }
+    /* Theme toggle switch */
+    .toggle-switch { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+    .toggle-track {
+      position: absolute; inset: 0; border-radius: 12px;
+      background: var(--subtle); border: 1.5px solid var(--card-border);
+      cursor: pointer; transition: background 0.2s, border-color 0.2s;
     }
-    .settings-select:hover, .settings-select:focus { border-color: var(--accent-mid); color: var(--accent); }
+    .toggle-track::after {
+      content: ''; position: absolute; top: 3px; left: 3px;
+      width: 16px; height: 16px; border-radius: 50%;
+      background: var(--muted); transition: transform 0.2s, background 0.2s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--accent-dim); border-color: var(--accent-mid); }
+    .toggle-switch input:checked + .toggle-track::after { transform: translateX(20px); background: var(--accent); }
+    /* Settings info button */
+    .settings-about-btn {
+      height: 30px; padding: 0 14px; border-radius: 8px;
+      border: 1.5px solid var(--card-border); background: var(--seg-bg);
+      color: var(--muted); font-family: inherit; font-size: 12px;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .settings-about-btn:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
+    /* ── Export duration modal ── */
+    .export-dur-pills { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+    .dur-pill {
+      flex: 1; min-width: 64px; height: 40px; border-radius: 10px;
+      border: 1.5px solid var(--card-border); background: var(--seg-bg);
+      color: var(--muted); font-family: inherit; font-size: 13px;
+      cursor: pointer; transition: all 0.15s; font-weight: 500;
+    }
+    .dur-pill:hover { border-color: var(--accent-mid); color: var(--accent); background: var(--accent-dim); }
+    .dur-pill.selected { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); font-weight: 600; }
+    .btn-start-export {
+      width: 100%; height: 42px; border-radius: 12px;
+      border: none; background: var(--accent); color: #fff;
+      font-family: inherit; font-size: 14px; font-weight: 600;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .btn-start-export:hover { opacity: 0.88; }
+    .btn-start-export:disabled { opacity: 0.45; cursor: not-allowed; }
   </style>
 </head>
 <body>
@@ -386,7 +415,6 @@
     </div>
     <div class="hdr-right">
       <span class="status-dot" id="statusDot"></span>
-      <button class="theme-btn" id="themeBtn" onclick="toggleTheme()">🌙</button>
       <button class="info-btn" onclick="openSettings()" title="Settings">⚙</button>
       <button class="info-btn" onclick="openInfo()" title="About Campana">ⓘ</button>
     </div>
@@ -586,7 +614,7 @@
     <div class="transport-info">
       <div class="t-status" id="tStatus">Ready</div>
     </div>
-    <button class="btn-export" id="exportBtn" onclick="exportWav()">
+    <button class="btn-export" id="exportBtn" onclick="openExportModal()">
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
            stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
         <path d="M6 1v7M3 5l3 3 3-3M1 10v1h10v-1"/>
@@ -599,24 +627,48 @@
 
 <!-- Settings modal -->
 <div class="modal-overlay" id="settingsModal" onclick="closeSettingsOnBg(event)">
-  <div class="modal" style="max-width:360px">
+  <div class="modal" style="max-width:340px">
     <div class="modal-hdr">
       <span class="modal-title">Settings</span>
       <button class="modal-close" onclick="closeSettings()">✕</button>
     </div>
     <div class="modal-body">
       <div class="settings-section">
-        <h3>Export</h3>
         <div class="settings-row">
-          <span class="settings-label">Duration</span>
-          <select class="settings-select" id="exportDur" title="Export duration">
-            <option value="1">1 minute</option>
-            <option value="2" selected>2 minutes</option>
-            <option value="3">3 minutes</option>
-            <option value="4">4 minutes</option>
-          </select>
+          <span class="settings-label">Dark mode</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="darkToggle" onchange="applyTheme(this.checked)">
+            <span class="toggle-track"></span>
+          </label>
+        </div>
+        <div class="settings-row">
+          <span class="settings-label">About Campana</span>
+          <button class="settings-about-btn" onclick="closeSettings();openInfo()">Open ↗</button>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Export duration modal -->
+<div class="modal-overlay" id="exportModal" onclick="closeExportOnBg(event)">
+  <div class="modal" style="max-width:320px">
+    <div class="modal-hdr">
+      <span class="modal-title">Export WAV</span>
+      <button class="modal-close" onclick="closeExportModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:4px">Select duration</p>
+      <div class="export-dur-pills">
+        <button class="dur-pill" onclick="selectDur(this, 0.5)">30 s</button>
+        <button class="dur-pill selected" onclick="selectDur(this, 1)">1 min</button>
+        <button class="dur-pill" onclick="selectDur(this, 2)">2 min</button>
+        <button class="dur-pill" onclick="selectDur(this, 3)">3 min</button>
+        <button class="dur-pill" onclick="selectDur(this, 4)">4 min</button>
+      </div>
+      <button class="btn-start-export" id="startExportBtn" onclick="startExport()">
+        Download WAV
+      </button>
     </div>
   </div>
 </div>
@@ -672,7 +724,7 @@
 <script>
 // ── API URL helper (passthrough for local server; replaced in docs build) ──
 const CAMPANA_API_BASE = 'https://campana.onrender.com';
-function apiUrl(path) { return CAMPANA_API_BASE + path; }
+    function apiUrl(path) { return CAMPANA_API_BASE + path; }
 // ── Global error trap — shows JS errors in the status bar ──────────────────
 window.onerror = (msg, src, line) => {
   const el = document.getElementById('tStatus');
@@ -722,19 +774,40 @@ function openSettings()  { document.getElementById('settingsModal').classList.ad
 function closeSettings() { document.getElementById('settingsModal').classList.remove('open'); }
 function closeSettingsOnBg(e) { if (e.target === e.currentTarget) closeSettings(); }
 
+// ── Export modal ────────────────────────────────────────────────────────────
+let exportDurMinutes = 1;
+function openExportModal() {
+  document.getElementById('exportModal').classList.add('open');
+}
+function closeExportModal() { document.getElementById('exportModal').classList.remove('open'); }
+function closeExportOnBg(e) { if (e.target === e.currentTarget) closeExportModal(); }
+function selectDur(btn, minutes) {
+  exportDurMinutes = minutes;
+  document.querySelectorAll('.dur-pill').forEach(p => p.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+async function startExport() {
+  closeExportModal();
+  await exportWav();
+}
+
 // ── Theme ──────────────────────────────────────────────────────────────────
-function toggleTheme() {
-  const html = document.documentElement;
-  const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  html.setAttribute('data-theme', next);
-  document.getElementById('themeBtn').textContent = next === 'dark' ? '☀️' : '🌙';
+function applyTheme(dark) {
+  const next = dark ? 'dark' : 'light';
+  document.documentElement.setAttribute('data-theme', next);
+  const tog = document.getElementById('darkToggle');
+  if (tog) tog.checked = dark;
   localStorage.setItem('campana-theme', next);
+}
+function toggleTheme() {
+  applyTheme(document.documentElement.getAttribute('data-theme') !== 'dark');
 }
 (function(){
   const t = localStorage.getItem('campana-theme') || 'light';
   document.documentElement.setAttribute('data-theme', t);
   document.addEventListener('DOMContentLoaded', () => {
-    document.getElementById('themeBtn').textContent = t === 'dark' ? '☀️' : '🌙';
+    const tog = document.getElementById('darkToggle');
+    if (tog) tog.checked = (t === 'dark');
   });
 })();
 
@@ -1130,7 +1203,7 @@ async function togglePlay() {
 
 // ── Export ─────────────────────────────────────────────────────────────────
 async function exportWav() {
-  const minutes = parseFloat($('exportDur').value) || 2;
+  const minutes = exportDurMinutes || 1;
   $('exportBtn').disabled = true;
   setStatus('Starting render…', 'loading');
   try {
