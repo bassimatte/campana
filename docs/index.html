@@ -644,6 +644,12 @@
           <span class="settings-label">About Campana</span>
           <button class="settings-about-btn" onclick="closeSettings();openInfo()">Open ↗</button>
         </div>
+        <div class="settings-row">
+          <span class="settings-label">Code</span>
+          <a id="app-version-link" href="https://github.com/bassimatte/campana"
+             target="_blank" rel="noopener"
+             style="font-size:11px;color:var(--muted);text-decoration:none;font-family:monospace;letter-spacing:0.05em;">…</a>
+        </div>
       </div>
     </div>
   </div>
@@ -822,7 +828,30 @@ function toggleTheme() {
   });
 })();
 
-// ── Tabs ───────────────────────────────────────────────────────────────────
+// ── Version display ────────────────────────────────────────────────────────
+(async () => {
+  const REPO = 'bassimatte/campana';
+  const BASE = 'https://github.com/' + REPO;
+  function _applyVersion(sha) {
+    const el = document.getElementById('app-version-link');
+    if (!el) return;
+    el.textContent = sha.slice(0, 7);
+    el.href = `${BASE}/commit/${sha}`;
+    el.title = `GitHub commit ${sha.slice(0, 7)}`;
+  }
+  try {
+    const r = await fetch(apiUrl('/api/version'));
+    if (r.ok) {
+      const v = await r.json();
+      if (v && v.sha && v.sha !== 'unknown') { _applyVersion(v.sha); return; }
+    }
+  } catch (_) {}
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/commits/master?per_page=1`);
+    const d = await r.json();
+    if (d && d.sha) _applyVersion(d.sha);
+  } catch (_) {}
+})();
 function setTab(name) {
   document.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.id === 'tab-' + name));
   document.querySelectorAll('.panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + name));

@@ -9,7 +9,9 @@ import asyncio
 import io
 import json
 import logging
+import os
 import struct
+import subprocess
 import threading
 import traceback
 import uuid
@@ -316,6 +318,23 @@ def index():
         _STATIC_DIR / "index.html",
         headers={"Cache-Control": "no-store, no-cache, must-revalidate"},
     )
+
+
+@app.get("/api/version")
+async def get_version():
+    """Return the running git commit SHA and GitHub repo URL."""
+    sha = os.environ.get("GIT_SHA", "")
+    if not sha:
+        try:
+            sha = subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=str(Path(__file__).parent.parent),
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except Exception:
+            sha = "unknown"
+    return JSONResponse({"sha": sha, "repo": "https://github.com/bassimatte/campana"})
 
 
 @app.get("/api/presets")
