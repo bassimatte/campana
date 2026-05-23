@@ -35,8 +35,44 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_DIR.mkdir(exist_ok=True)
 
 # ── Background render jobs (async export) ─────────────────────────────────────
-_render_jobs: dict = {}   # job_id → {status, data, fname, error}
+_render_jobs: dict = {}   # job_id → {status, data, fname, error, media_type}
 _JOBS_MAX = 20            # cap in-memory slots
+
+
+def _convert_audio(wav_bytes: bytes, fmt: str) -> tuple:
+    """Convert WAV bytes to the requested format.
+    Returns (data: bytes, media_type: str, ext: str).
+    Falls back to WAV if dependencies are missing.
+    """
+    fmt = (fmt or "wav").lower().strip()
+    if fmt == "wav":
+        return wav_bytes, "audio/wav", "wav"
+    try:
+        import soundfile as sf
+        buf_in = io.BytesIO(wav_bytes)
+        audio, sr = sf.read(buf_in, dtype="float32")  # (samples, channels)
+        if fmt == "flac":
+            buf_out = io.BytesIO()
+            sf.write(buf_out, audio, sr, format="FLAC", subtype="PCM_16")
+            return buf_out.getvalue(), "audio/flac", "flac"
+        if fmt == "mp3":
+            try:
+                import lameenc
+                audio_i16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
+                channels = audio_i16.shape[1] if audio_i16.ndim > 1 else 1
+                enc = lameenc.Encoder()
+                enc.set_bit_rate(320)
+                enc.set_in_sample_rate(sr)
+                enc.set_channels(channels)
+                enc.set_quality(2)
+                mp3 = enc.encode(audio_i16.flatten().tobytes()) + enc.flush()
+                return mp3, "audio/mpeg", "mp3"
+            except ImportError:
+                logging.warning("lameenc not installed — falling back to WAV")
+                return wav_bytes, "audio/wav", "wav"
+    except ImportError:
+        logging.warning("soundfile not installed — falling back to WAV")
+    return wav_bytes, "audio/wav", "wav"
 
 app = FastAPI(title="Bells Generator", version="1.0")
 
@@ -328,22 +364,26 @@ async def start_render(request: Request):
     body    = await request.json()
     p       = _parse_render_params(body)
     minutes = float(body.get("export_minutes", 5))
+    fmt     = (body.get("export_format") or "wav").lower()
     p["export_beats"] = minutes * p["bpm"]   # convert user minutes → beats
     name    = (PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values())))["name"]
-    fname   = name.replace(" ", "_") + ".wav"
 
     job_id = uuid.uuid4().hex[:10]
     # Evict oldest job if at capacity
     if len(_render_jobs) >= _JOBS_MAX:
         oldest = next(iter(_render_jobs))
         del _render_jobs[oldest]
-    _render_jobs[job_id] = {"status": "pending", "data": None, "fname": fname, "error": None}
+    _render_jobs[job_id] = {"status": "pending", "data": None, "fname": None,
+                             "media_type": "audio/wav", "error": None}
 
     def _run():
         try:
             wav = _do_full_render(p)
-            _render_jobs[job_id]["data"]   = wav
-            _render_jobs[job_id]["status"] = "done"
+            data, media_type, ext = _convert_audio(wav, fmt)
+            _render_jobs[job_id]["data"]       = data
+            _render_jobs[job_id]["fname"]      = name.replace(" ", "_") + "." + ext
+            _render_jobs[job_id]["media_type"] = media_type
+            _render_jobs[job_id]["status"]     = "done"
         except Exception:
             tb = traceback.format_exc()
             logging.error("render job %s error:\n%s", job_id, tb)
@@ -368,18 +408,19 @@ async def render_status(job_id: str):
 
 @app.get("/api/render/{job_id}/file")
 async def download_render(job_id: str):
-    """Download the finished WAV. Cleans up the job after download."""
+    """Download the finished file. Cleans up the job after download."""
     job = _render_jobs.get(job_id)
     if not job:
         return JSONResponse({"detail": "job not found"}, status_code=404)
     if job["status"] != "done" or job["data"] is None:
         return JSONResponse({"detail": "not ready"}, status_code=202)
-    wav   = job.pop("data")
-    fname = job["fname"]
+    data       = job.pop("data")
+    fname      = job["fname"]
+    media_type = job.get("media_type", "audio/wav")
     del _render_jobs[job_id]
     return Response(
-        content=wav,
-        media_type="audio/wav",
+        content=data,
+        media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
     )
 

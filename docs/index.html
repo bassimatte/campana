@@ -653,20 +653,26 @@
 <div class="modal-overlay" id="exportModal" onclick="closeExportOnBg(event)">
   <div class="modal" style="max-width:320px">
     <div class="modal-hdr">
-      <span class="modal-title">Export WAV</span>
+      <span class="modal-title">Export</span>
       <button class="modal-close" onclick="closeExportModal()">✕</button>
     </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:var(--muted);margin-bottom:4px">Select duration</p>
-      <div class="export-dur-pills">
+      <p style="font-size:13px;color:var(--muted);margin-bottom:4px">Duration</p>
+      <div class="export-dur-pills" id="durPills">
         <button class="dur-pill" onclick="selectDur(this, 0.5)">30 s</button>
         <button class="dur-pill selected" onclick="selectDur(this, 1)">1 min</button>
         <button class="dur-pill" onclick="selectDur(this, 2)">2 min</button>
         <button class="dur-pill" onclick="selectDur(this, 3)">3 min</button>
         <button class="dur-pill" onclick="selectDur(this, 4)">4 min</button>
       </div>
+      <p style="font-size:13px;color:var(--muted);margin:12px 0 4px">Format</p>
+      <div class="export-dur-pills" id="fmtPills">
+        <button class="dur-pill selected" onclick="selectFmt(this,'wav')">WAV</button>
+        <button class="dur-pill" onclick="selectFmt(this,'flac')">FLAC</button>
+        <button class="dur-pill" onclick="selectFmt(this,'mp3')">MP3</button>
+      </div>
       <button class="btn-start-export" id="startExportBtn" onclick="startExport()">
-        Download WAV
+        Download
       </button>
     </div>
   </div>
@@ -775,6 +781,7 @@ function closeSettingsOnBg(e) { if (e.target === e.currentTarget) closeSettings(
 
 // ── Export modal ────────────────────────────────────────────────────────────
 let exportDurMinutes = 1;
+let exportFormat = 'wav';
 function openExportModal() {
   document.getElementById('exportModal').classList.add('open');
 }
@@ -782,7 +789,12 @@ function closeExportModal() { document.getElementById('exportModal').classList.r
 function closeExportOnBg(e) { if (e.target === e.currentTarget) closeExportModal(); }
 function selectDur(btn, minutes) {
   exportDurMinutes = minutes;
-  document.querySelectorAll('.dur-pill').forEach(p => p.classList.remove('selected'));
+  document.querySelectorAll('#durPills .dur-pill').forEach(p => p.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+function selectFmt(btn, fmt) {
+  exportFormat = fmt;
+  document.querySelectorAll('#fmtPills .dur-pill').forEach(p => p.classList.remove('selected'));
   btn.classList.add('selected');
 }
 async function startExport() {
@@ -1203,13 +1215,14 @@ async function togglePlay() {
 // ── Export ─────────────────────────────────────────────────────────────────
 async function exportWav() {
   const minutes = exportDurMinutes || 1;
+  const fmt     = exportFormat || 'wav';
   $('exportBtn').disabled = true;
   setStatus('Starting render…', 'loading');
   try {
     // 1. Start background render job — returns immediately with job_id
     const startR = await fetch(apiUrl('/api/render'), {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ ...getParams(), export_minutes: minutes }),
+      body: JSON.stringify({ ...getParams(), export_minutes: minutes, export_format: fmt }),
     });
     if (!startR.ok) {
       const txt = await startR.text().catch(() => startR.status);
@@ -1223,7 +1236,7 @@ async function exportWav() {
     while (status === 'pending') {
       await sleep(2000);
       elapsed += 2;
-      setStatus(`Rendering ${minutes} min WAV… (${elapsed}s)`, 'loading');
+      setStatus(`Rendering ${minutes} min ${fmt.toUpperCase()}… (${elapsed}s)`, 'loading');
       if (Date.now() > deadline) throw new Error('timed out');
       const sr = await fetch(apiUrl(`/api/render/${job_id}`));
       const sj = await sr.json();
@@ -1237,7 +1250,7 @@ async function exportWav() {
     if (!dlR.ok) throw new Error(`Download failed: ${dlR.status}`);
     const url = URL.createObjectURL(await dlR.blob());
     const a = document.createElement('a'); a.href = url;
-    a.download = selPreset + '.wav'; a.click(); URL.revokeObjectURL(url);
+    a.download = selPreset + '.' + fmt; a.click(); URL.revokeObjectURL(url);
     setStatus('Downloaded ✓', 'playing');
   } catch (e) {
     setStatus('Export error: ' + e.message, '');
