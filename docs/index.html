@@ -111,7 +111,7 @@
     .viz-label.playing { color: var(--accent); }
     .viz-label.loading { color: var(--accent); }
 
-    /* ── Wake banner (Render cold-start indicator) ── */
+    /* ── Wake banner (host cold-start indicator) ── */
     .wake-banner {
       position: absolute; inset: 0; z-index: 10;
       display: flex; align-items: center; justify-content: center;
@@ -734,7 +734,7 @@
 
 <script>
 // ── API URL helper (passthrough for local server; replaced in docs build) ──
-const CAMPANA_API_BASE = 'https://campana.onrender.com';
+const CAMPANA_API_BASE = 'https://campana-production.up.railway.app';
     function apiUrl(path) { return CAMPANA_API_BASE + path; }
 // ── Global error trap — shows JS errors in the status bar ──────────────────
 window.onerror = (msg, src, line) => {
@@ -747,7 +747,7 @@ window.onunhandledrejection = e => {
   if (el) el.textContent = 'Async error: ' + (e.reason?.message || e.reason);
 };
 
-// ── Cold-start wakeup indicator (GitHub Pages / Render only) ──────────────
+// ── Cold-start wakeup indicator (GitHub Pages / remote API only) ──────────
 (function () {
   if (typeof CAMPANA_API_BASE === 'undefined') return; // local — skip
   const banner   = document.getElementById('wakeBanner');

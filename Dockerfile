@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements-server.txt
 # Application
 COPY . .
 
-# Render provides PORT env variable
+# Railway provides PORT at runtime; 10000 is the local container default.
 ENV PORT=10000
 EXPOSE ${PORT}
 
