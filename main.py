@@ -316,7 +316,7 @@ def _sample_freesound_row(texture: str, note_name: str, filename: str,
         "bell single-note sample instrument one-shot additive-synthesis "
         "campana synthesizer 24bit high-resolution"
     )
-    tags = f"{base_tags} {_TEXTURE_TAGS[texture]} {note_ltr.lower()} octave{note_num}"
+    tags = f"{base_tags} {_TEXTURE_TAGS[texture]} {note_ltr.lower()} octave{note_num} {note_ltr}{note_num}"
 
     return {
         "audio_filename": filename,
@@ -327,7 +327,7 @@ def _sample_freesound_row(texture: str, note_name: str, filename: str,
         "license":        "Creative Commons 0",
         "pack_name":      f"Campana Bell Samples — {tex_cap}",
         "is_explicit":    0,
-        "bst_category":   "m-m",
+        "bst_category":   "is-e",
     }
 
 
