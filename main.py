@@ -225,6 +225,7 @@ def export_samples(
 
     total = len(textures) * len(notes) * len(octaves)
     done  = 0
+    xlsx_rows = []
 
     print(f"\n🔔  Exporting {total} bell samples  →  {output_dir}/")
     print(f"    Textures : {', '.join(textures)}")
@@ -258,9 +259,13 @@ def export_samples(
                 out_path.write_bytes(wav)
                 done += 1
                 dur_s = (len(wav) - 44) / (sample_rate * 2 * 3)
+                rel_path = f"{texture}/{note_name}.wav"
+                xlsx_rows.append(_sample_freesound_row(texture, note_name, rel_path, dur_s, sample_rate))
                 print(f"  [{done:>3}/{total}]  {texture:<10} {note_name:<5}  "
                       f"{dur_s:.1f}s  →  {out_path}")
 
+    xlsx_path = output_dir / "freesound_bulk.xlsx"
+    write_freesound_xlsx(xlsx_rows, xlsx_path)
     print(f"\n✅  Done — {total} samples in {output_dir}/")
 
 
@@ -271,6 +276,59 @@ _TEXTURE_SAMPLE_PARAMS = {
     "bowl":     {"decay_mult": 1.5, "beating": 0.45, "strike_level": 0.0, "attack_ms": 8},
     "crystal":  {"decay_mult": 1.1, "beating": 0.15, "strike_level": 0.1, "attack_ms": 0},
 }
+
+_TEXTURE_BLURB = {
+    "tubular":  "Bright, metallic tubular bell with sharp attack and clear overtones.",
+    "church":   "Deep cast-bronze church bell with a warm fundamental and long resonance.",
+    "bowl":     "Tibetan singing bowl with slowly beating partials and an extended, shimmering decay.",
+    "crystal":  "Glass-like crystal bell with high inharmonic partials and a glassy, sustained shimmer.",
+}
+
+_TEXTURE_TAGS = {
+    "tubular":  "tubular-bell metal bright attack overtone",
+    "church":   "church-bell bronze cast-bell deep warm",
+    "bowl":     "singing-bowl tibetan meditation beating shimmer",
+    "crystal":  "crystal glass bell harmonic shimmer glassy",
+}
+
+_CAMPANA_BLURB = (
+    "Generated with Campana — a browser-based generative bell synthesizer using additive synthesis "
+    "(https://bassimatte.github.io/campana/)."
+)
+
+
+def _sample_freesound_row(texture: str, note_name: str, filename: str,
+                          dur_s: float, sample_rate: int) -> dict:
+    """Build one Freesound metadata row for a single bell sample file."""
+    tex_cap  = texture.capitalize()
+    note_num = note_name[-1]        # octave digit
+    note_ltr = note_name[:-1]       # note letter(s)
+
+    sound_desc = (
+        f"{tex_cap} bell tone — note {note_ltr}, octave {note_num}. "
+        f"{_TEXTURE_BLURB[texture]} "
+        f"Single note, ~{dur_s:.0f}s natural decay. "
+        f"24-bit / {sample_rate // 1000} kHz stereo WAV. Dry (no reverb).\n\n"
+        f"{_CAMPANA_BLURB}"
+    )
+
+    base_tags = (
+        "bell single-note sample instrument one-shot additive-synthesis "
+        "campana synthesizer 24bit high-resolution"
+    )
+    tags = f"{base_tags} {_TEXTURE_TAGS[texture]} {note_ltr.lower()} octave{note_num}"
+
+    return {
+        "audio_filename": filename,
+        "name":           f"{tex_cap} Bell — {note_ltr}{note_num}",
+        "tags":           tags,
+        "geotag":         "",
+        "description":    sound_desc,
+        "license":        "Creative Commons 0",
+        "pack_name":      f"Campana Bell Samples — {tex_cap}",
+        "is_explicit":    0,
+        "bst_category":   "m-m",
+    }
 
 
 def _freesound_row(preset_id: str, filename: str, minutes: float) -> dict:
