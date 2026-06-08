@@ -12,10 +12,21 @@ Usage:
     python main.py --all --minutes 2               # all presets, 2 min each
     python main.py --preset sera --freesound       # single preset + freesound row
     python main.py --gui                           # launch web UI
+
+    # Individual bell note samples (24-bit WAV, suitable as instrument samples):
+    python main.py --samples                       # all textures × C2-B5 (192 files)
+    python main.py --samples --sample-textures tubular church
+    python main.py --samples --sample-octaves 3 4 5
+    python main.py --samples --sample-notes C D E G A
+    python main.py --samples --sample-rate 96000   # 96 kHz high-res
+    python main.py --samples --sample-reverb 0.3   # samples with reverb
+    python main.py --samples --sample-dir my_samples/
 """
 
 import argparse
+import struct
 import sys
+import numpy as np
 from pathlib import Path
 
 EXPORT_DIR = Path("exports")
@@ -85,6 +96,181 @@ _PRESET_DESCRIPTION_TEMPLATE = """\
 Texture: {texture} | Key: {key} {scale_mode} | BPM: {bpm}
 
 {blurb}"""
+
+
+import struct
+
+
+def _write_wav_24bit(audio: np.ndarray, sample_rate: int) -> bytes:
+    """Write a stereo float64 array as 24-bit PCM WAV at the given sample rate.
+    Normalises to -1 dBFS before encoding.
+    """
+    peak = np.max(np.abs(audio))
+    if peak > 0:
+        audio = audio / peak * 0.9089  # -1 dBFS
+    # Scale to 24-bit signed integer range and interleave L/R
+    pcm = np.clip(audio * 8_388_607, -8_388_608, 8_388_607).astype(np.int32)
+    flat = pcm.flatten(order='C')   # interleaved L R L R …
+
+    # Vectorised 24-bit packing: view int32 as 4 bytes, drop MSB (big-endian) or
+    # keep bytes 0-2 (little-endian). int32 is already little-endian on x86.
+    b4 = flat.view(np.uint8).reshape(-1, 4)   # shape (N, 4), LE order
+    data_bytes = b4[:, :3].tobytes()           # keep low 3 bytes → 24-bit LE PCM
+
+    channels    = 2
+    bit_depth   = 24
+    byte_depth  = 3
+    data_size   = len(data_bytes)
+    byte_rate   = sample_rate * channels * byte_depth
+    block_align = channels * byte_depth
+
+    header = struct.pack('<4sI4s4sIHHIIHH4sI',
+        b'RIFF', 36 + data_size, b'WAVE',
+        b'fmt ', 16,
+        1,            # PCM
+        channels,
+        sample_rate,
+        byte_rate,
+        block_align,
+        bit_depth,
+        b'data', data_size,
+    )
+    return header + data_bytes
+
+
+def render_bell_sample(
+    note_name: str,
+    texture: str = "tubular",
+    decay_mult: float = 1.0,
+    beating: float = 0.0,
+    strike_level: float = 0.0,
+    attack_ms: float = 0.0,
+    reverb_room: float = 0.0,
+    reverb_damping: float = 0.4,
+    reverb_width: float = 0.8,
+    reverb_wet: float = 0.0,
+    velocity: float = 1.0,
+    tail_s: float = 1.0,
+    sample_rate: int = None,
+) -> bytes:
+    """Render a single bell note as a 24-bit stereo WAV sample.
+
+    The duration is determined by the texture's longest partial decay
+    time × decay_mult, plus a configurable tail silence.
+    Returns raw WAV bytes.
+    """
+    from engine.synth import (
+        BELL_TEXTURES, SAMPLE_RATE as _SR,
+        bell_tone, freeverb, note_freq,
+    )
+    sr = sample_rate or _SR
+    partials = BELL_TEXTURES.get(texture, BELL_TEXTURES["tubular"])
+    max_tau  = max(tau for _, _, tau in partials)
+    # Duration long enough for the tone to fully decay to inaudibility
+    duration = max_tau * decay_mult * 5.0 + tail_s   # 5τ ≈ -65 dB
+
+    freq = note_freq(note_name)
+
+    # Mono synthesis then spread to stereo
+    _MICRO = 0.0007
+    left  = bell_tone(freq * (1 + _MICRO), duration, velocity=velocity,
+                      decay_mult=decay_mult, texture=texture,
+                      attack_ms=attack_ms, beating=beating,
+                      strike_level=strike_level)
+    right = bell_tone(freq * (1 - _MICRO), duration, velocity=velocity,
+                      decay_mult=decay_mult, texture=texture,
+                      attack_ms=attack_ms, beating=beating,
+                      strike_level=strike_level)
+
+    stereo = np.column_stack([left, right]).astype(np.float64)
+
+    if reverb_wet > 0.005 and reverb_room > 0.0:
+        stereo = freeverb(stereo,
+                          room_size=reverb_room,
+                          damping=reverb_damping,
+                          wet=reverb_wet,
+                          width=reverb_width)
+
+    return _write_wav_24bit(stereo, sr)
+
+
+def export_samples(
+    textures: list | None = None,
+    octaves: list | None = None,
+    notes: list | None = None,
+    decay_mult: float = 1.0,
+    reverb_wet: float = 0.0,
+    reverb_room: float = 0.5,
+    output_dir: Path = None,
+    sample_rate: int = 48_000,
+    beating: float = 0.0,
+    strike_level: float = 0.0,
+):
+    """Export one 24-bit WAV sample per (texture, note, octave) combination.
+
+    Files are written to output_dir/<texture>/<note><octave>.wav
+    e.g.  samples/tubular/C4.wav
+    """
+    import numpy as np  # ensure available in scope
+    from engine.synth import BELL_TEXTURES, _NOTE_NAMES
+
+    all_textures = list(BELL_TEXTURES.keys())
+    all_notes    = _NOTE_NAMES   # chromatic, 12 notes
+
+    textures = textures or all_textures
+    octaves  = octaves  or [2, 3, 4, 5]
+    notes    = notes    or all_notes
+
+    output_dir = output_dir or (EXPORT_DIR / "samples")
+
+    total = len(textures) * len(notes) * len(octaves)
+    done  = 0
+
+    print(f"\n🔔  Exporting {total} bell samples  →  {output_dir}/")
+    print(f"    Textures : {', '.join(textures)}")
+    print(f"    Notes    : {', '.join(notes)}")
+    print(f"    Octaves  : {', '.join(str(o) for o in octaves)}")
+    print(f"    Format   : 24-bit / {sample_rate // 1000} kHz stereo WAV")
+    if reverb_wet > 0:
+        print(f"    Reverb   : room={reverb_room:.2f}  wet={reverb_wet:.2f}")
+    print()
+
+    for texture in textures:
+        t_params = _TEXTURE_SAMPLE_PARAMS.get(texture, {})
+        tex_dir = output_dir / texture
+        tex_dir.mkdir(parents=True, exist_ok=True)
+
+        for note in notes:
+            for octave in octaves:
+                note_name = f"{note}{octave}"
+                out_path  = tex_dir / f"{note_name}.wav"
+                wav = render_bell_sample(
+                    note_name,
+                    texture       = texture,
+                    decay_mult    = t_params.get("decay_mult", decay_mult),
+                    beating       = t_params.get("beating", beating),
+                    strike_level  = t_params.get("strike_level", strike_level),
+                    attack_ms     = t_params.get("attack_ms", 0.0),
+                    reverb_wet    = reverb_wet,
+                    reverb_room   = reverb_room,
+                    sample_rate   = sample_rate,
+                )
+                out_path.write_bytes(wav)
+                done += 1
+                dur_s = (len(wav) - 44) / (sample_rate * 2 * 3)
+                print(f"  [{done:>3}/{total}]  {texture:<10} {note_name:<5}  "
+                      f"{dur_s:.1f}s  →  {out_path}")
+
+    print(f"\n✅  Done — {total} samples in {output_dir}/")
+
+
+# Per-texture defaults for sample rendering (tweak per bell family)
+_TEXTURE_SAMPLE_PARAMS = {
+    "tubular":  {"decay_mult": 1.0, "beating": 0.0,  "strike_level": 0.4, "attack_ms": 0},
+    "church":   {"decay_mult": 1.2, "beating": 0.0,  "strike_level": 0.2, "attack_ms": 0},
+    "bowl":     {"decay_mult": 1.5, "beating": 0.45, "strike_level": 0.0, "attack_ms": 8},
+    "crystal":  {"decay_mult": 1.1, "beating": 0.15, "strike_level": 0.1, "attack_ms": 0},
+}
 
 
 def _freesound_row(preset_id: str, filename: str, minutes: float) -> dict:
@@ -224,6 +410,29 @@ def main():
                         help="Export duration in minutes (default: 2)")
     parser.add_argument("--output",    type=Path, default=None,
                         help="Output WAV path (single preset only)")
+
+    # ── Sample export ──────────────────────────────────────────────────────────
+    parser.add_argument("--samples",        action="store_true",
+                        help="Export individual bell note samples (24-bit WAV)")
+    parser.add_argument("--sample-textures", nargs="+",
+                        choices=["tubular", "church", "bowl", "crystal"],
+                        metavar="TEXTURE",
+                        help="Textures to sample (default: all four)")
+    parser.add_argument("--sample-octaves",  nargs="+", type=int,
+                        metavar="N",
+                        help="Octaves to sample (default: 2 3 4 5)")
+    parser.add_argument("--sample-notes",    nargs="+",
+                        metavar="NOTE",
+                        help="Notes to sample, e.g. C D E F G A B (default: all 12)")
+    parser.add_argument("--sample-rate",     type=int, default=48_000,
+                        choices=[44100, 48000, 88200, 96000],
+                        help="Sample rate in Hz (default: 48000)")
+    parser.add_argument("--sample-reverb",   type=float, default=0.0,
+                        metavar="WET",
+                        help="Reverb wet mix for samples 0–1 (default: 0 = dry)")
+    parser.add_argument("--sample-dir",      type=Path,
+                        default=EXPORT_DIR / "samples",
+                        help="Output directory for samples")
     args = parser.parse_args()
 
     if args.list:
@@ -236,6 +445,17 @@ def main():
         except ImportError as e:
             sys.exit(f"Web UI requires fastapi and uvicorn.\nError: {e}")
         launch_gui()
+        return
+
+    if args.samples:
+        export_samples(
+            textures   = args.sample_textures,
+            octaves    = args.sample_octaves,
+            notes      = args.sample_notes,
+            reverb_wet = args.sample_reverb,
+            output_dir = args.sample_dir,
+            sample_rate= args.sample_rate,
+        )
         return
 
     if args.all:
