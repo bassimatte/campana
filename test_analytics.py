@@ -55,11 +55,11 @@ class AnalyticsTests(unittest.TestCase):
         self.assertIsNotNone(schema_match)
         schema = schema_match.group(1)
         for event in (
-            "audio_started",
-            "audio_failed",
-            "listening_reached",
-            "export_completed",
-            "export_failed",
+            "campana_audio_started",
+            "campana_audio_failed",
+            "campana_listening_reached",
+            "campana_export_completed",
+            "campana_export_failed",
         ):
             self.assertIn(f"{event}:", schema)
             self.assertRegex(self.static_html, rf"trackUsage\('{event}'")
@@ -70,10 +70,10 @@ class AnalyticsTests(unittest.TestCase):
     def test_public_festa_name_is_reported(self):
         self.assertIn("'festa'", self.static_html)
         self.assertIn("value === 'giardino' ? 'festa'", self.static_html)
-        audio_started_schema = re.search(
-            r"audio_started: \{(.*?)\n  \},", self.static_html, re.DOTALL
+        campana_audio_started_schema = re.search(
+            r"campana_audio_started: \{(.*?)\n  \},", self.static_html, re.DOTALL
         ).group(1)
-        self.assertNotIn("'giardino'", audio_started_schema)
+        self.assertNotIn("'giardino'", campana_audio_started_schema)
 
     def test_sensitive_dynamic_values_are_not_sent(self):
         calls = re.findall(

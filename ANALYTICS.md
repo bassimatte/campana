@@ -34,11 +34,11 @@ session replay or heatmaps for Campana.
 
 | Event | Meaning | Allowed properties |
 |---|---|---|
-| `audio_started` | The first audio chunk was decoded and scheduled | `preset`, `texture`, latency bucket |
-| `audio_failed` | Initial playback or continued streaming failed | `stage`, coarse `reason` |
-| `listening_reached` | Active playback reached 30 seconds, 2 minutes, or 5 minutes | `preset`, `duration` |
-| `export_completed` | The rendered download was prepared successfully | `preset`, `format`, `duration` |
-| `export_failed` | Export start, render, or download failed | `stage`, `format` |
+| `campana_audio_started` | The first audio chunk was decoded and scheduled | `preset`, `texture`, latency bucket |
+| `campana_audio_failed` | Initial playback or continued streaming failed | `stage`, coarse `reason` |
+| `campana_listening_reached` | Active playback reached 30 seconds, 2 minutes, or 5 minutes | `preset`, `duration` |
+| `campana_export_completed` | The rendered download was prepared successfully | `preset`, `format`, `duration` |
+| `campana_export_failed` | Export start, render, or download failed | `stage`, `format` |
 
 Preset analytics use the public values `sera`, `tempio`, `cristallo`,
 `cattedrale`, `deriva`, `notte`, `festa`, and `aurora`. The legacy internal ID
@@ -48,8 +48,10 @@ Preset analytics use the public values `sera`, `tempio`, `cristallo`,
 
 The Umami Cloud website limit is already reached, so Campana reuses the existing
 `bassimatte.github.io` website used by Mantice. Every Campana pageview and event
-has the Umami tag `campana`, and its URL path starts with `/campana/`. Either
-field can isolate Campana data without consuming another website slot.
+has the Umami tag `campana`, and its URL path starts with `/campana/`. Custom
+event names also start with `campana_`, making them identifiable in Umami's
+Events tab even when no tag filter is active. These fields isolate Campana data
+without consuming another website slot.
 
 The shared Website ID is public tracker configuration, not an API key. No Umami
 API key is stored in the application.
@@ -60,7 +62,7 @@ After deployment:
 2. Apply the filter **Tag = campana**. A **Path = /campana/** filter is an
    additional cross-check.
 3. Open the deployed Campana page and verify a tagged page view in realtime.
-4. Start a preset and verify an `audio_started` event with its `preset`
+4. Start a preset and verify a `campana_audio_started` event with its `preset`
    property.
 
 ## Suggested reports
@@ -69,12 +71,13 @@ Primary funnel:
 
 ```text
 Page view
-  -> audio_started
-  -> listening_reached (30s)
-  -> listening_reached (2m)
-  -> export_completed
+  -> campana_audio_started
+  -> campana_listening_reached (30s)
+  -> campana_listening_reached (2m)
+  -> campana_export_completed
 ```
 
-Keep the **Tag = campana** filter applied, then break down `audio_started`,
-`listening_reached`, and `export_completed` by the `preset` property to compare
-actual preset usage and depth of listening.
+Keep the **Tag = campana** filter applied, then break down
+`campana_audio_started`, `campana_listening_reached`, and
+`campana_export_completed` by the `preset` property to compare actual preset
+usage and depth of listening.

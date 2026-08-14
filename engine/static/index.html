@@ -749,25 +749,25 @@ const CAMPANA_ANALYTICS_TAG = 'campana';
 const CAMPANA_UMAMI_WEBSITE_ID = 'b2300e0b-bc69-49d7-ad05-06f980b5ed38';
 const CAMPANA_UMAMI_SCRIPT_URL = 'https://cloud.umami.is/script.js';
 const CAMPANA_ANALYTICS_SCHEMA = Object.freeze({
-  audio_started: {
+  campana_audio_started: {
     preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
     texture: ['tubular', 'church', 'bowl', 'crystal'],
     latency: ['fast', 'warm', 'cold', 'slow'],
   },
-  audio_failed: {
+  campana_audio_failed: {
     stage: ['initial', 'stream'],
     reason: ['network', 'server', 'decode', 'timeout', 'unknown'],
   },
-  listening_reached: {
+  campana_listening_reached: {
     preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
     duration: ['30s', '2m', '5m'],
   },
-  export_completed: {
+  campana_export_completed: {
     preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
     format: ['wav', 'flac', 'mp3'],
     duration: ['30s', '1m', '2m', '3m', '4m'],
   },
-  export_failed: {
+  campana_export_failed: {
     stage: ['start', 'render', 'download'],
     format: ['wav', 'flac', 'mp3'],
   },
@@ -828,7 +828,7 @@ function trackUsage(eventName, properties = {}) {
 
 function analyticsPreset(value) {
   const preset = value === 'giardino' ? 'festa' : String(value || '');
-  return CAMPANA_ANALYTICS_SCHEMA.audio_started.preset.includes(preset) ? preset : 'sera';
+  return CAMPANA_ANALYTICS_SCHEMA.campana_audio_started.preset.includes(preset) ? preset : 'sera';
 }
 
 function analyticsLatency(milliseconds) {
@@ -1068,7 +1068,7 @@ function scheduleListeningMilestones(token, preset) {
   [['30s', 30_000], ['2m', 120_000], ['5m', 300_000]].forEach(([duration, delay]) => {
     listeningMilestoneTimers.push(setTimeout(() => {
       if (isPlaying && token === playToken) {
-        trackUsage('listening_reached', { preset, duration });
+        trackUsage('campana_listening_reached', { preset, duration });
       }
     }, delay));
   });
@@ -1301,7 +1301,7 @@ async function streamLoop({buf: firstBuffer, events: firstEvents}, token) {
       setStatus('Buffering…', 'loading');
       try { chunk = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS); } catch (_) {}
       if (!chunk) {
-        trackUsage('audio_failed', { stage: 'stream', reason: analyticsFailureReason(e) });
+        trackUsage('campana_audio_failed', { stage: 'stream', reason: analyticsFailureReason(e) });
         await hardStop(); setStatus('Render error', ''); break;
       }
     }
@@ -1348,7 +1348,7 @@ async function startPlayback() {
   try {
     await ensureAudio();
   } catch (err) {
-    trackUsage('audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
+    trackUsage('campana_audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
     await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
     return;
   }
@@ -1373,17 +1373,17 @@ async function startPlayback() {
     const analyticsPresetId = analyticsPreset(selPreset);
     streamLoop(first, token).catch(async err => {
       if (token !== playToken) return;
-      trackUsage('audio_failed', { stage: 'stream', reason: analyticsFailureReason(err) });
+      trackUsage('campana_audio_failed', { stage: 'stream', reason: analyticsFailureReason(err) });
       await hardStop(); setStatus('Error: ' + err.message, '');
     });
-    trackUsage('audio_started', {
+    trackUsage('campana_audio_started', {
       preset: analyticsPresetId,
       texture: selTexture,
       latency: analyticsLatency(performance.now() - playbackRequestedAt),
     });
     scheduleListeningMilestones(token, analyticsPresetId);
   } catch (err) {
-    trackUsage('audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
+    trackUsage('campana_audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
     await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
   }
 }
@@ -1437,14 +1437,14 @@ async function exportWav() {
     const url = URL.createObjectURL(await dlR.blob());
     const a = document.createElement('a'); a.href = url;
     a.download = selPreset + '.' + fmt; a.click(); URL.revokeObjectURL(url);
-    trackUsage('export_completed', {
+    trackUsage('campana_export_completed', {
       preset: analyticsPreset(selPreset),
       format: fmt,
       duration: analyticsExportDuration(minutes),
     });
     setStatus('Downloaded ✓', 'playing');
   } catch (e) {
-    trackUsage('export_failed', { stage: exportStage, format: fmt });
+    trackUsage('campana_export_failed', { stage: exportStage, format: fmt });
     setStatus('Export error: ' + e.message, '');
   }
   $('exportBtn').disabled = false;
