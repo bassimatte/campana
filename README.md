@@ -27,3 +27,9 @@ Then open http://127.0.0.1:8081
 Campana deploys on Railway using the repository `Dockerfile`. Railway injects
 the `PORT` environment variable; the container falls back to port `10000` for
 local Docker runs.
+
+## Analytics
+
+The canonical GitHub Pages app supports privacy-safe Umami product analytics.
+See [ANALYTICS.md](ANALYTICS.md) for the event schema, privacy boundary, and
+activation instructions.

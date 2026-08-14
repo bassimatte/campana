@@ -727,6 +727,9 @@
 
       <h3>Architecture</h3>
       <p>Audio is synthesised server-side in Python (NumPy/SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API schedules chunks gaplessly using a two-chunk prefetch buffer. Exports are rendered in 32-beat chunks through an async job queue, keeping peak memory under 250 MB regardless of duration.</p>
+
+      <h3>Privacy</h3>
+      <p>The public Campana website uses <a href="https://umami.is/" target="_blank" rel="noopener" style="color:var(--accent)">Umami</a> for anonymous, aggregate usage statistics. It records successful playback, broad listening-duration milestones, and completed exports so the project can be improved. Campana does not send seeds, control values, filenames, audio, or exact error messages. Analytics is disabled for local installations, repository forks, and the Railway backend.</p>
     </div>
     <div class="modal-foot">48 kHz · 16-bit stereo · generative · infinite<br>Created by <a href="https://freesound.org/people/bassimat/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Matteo Bassi</a></div>
   </div>
@@ -736,6 +739,121 @@
 // ── API URL helper (passthrough for local server; replaced in docs build) ──
 const CAMPANA_API_BASE = 'https://campana-production.up.railway.app';
     function apiUrl(path) { return CAMPANA_API_BASE + path; }
+
+// ── Privacy-safe product analytics ─────────────────────────────────────────
+// Analytics is intentionally limited to the canonical GitHub Pages app.
+// Campana shares the bassimatte.github.io Umami website with Mantice because
+// the account's website limit is reached. The tag and path keep reports separate.
+const CAMPANA_ANALYTICS_HOST = 'bassimatte.github.io';
+const CAMPANA_ANALYTICS_PATH = '/campana';
+const CAMPANA_ANALYTICS_TAG = 'campana';
+const CAMPANA_UMAMI_WEBSITE_ID = 'b2300e0b-bc69-49d7-ad05-06f980b5ed38';
+const CAMPANA_UMAMI_SCRIPT_URL = 'https://cloud.umami.is/script.js';
+const CAMPANA_ANALYTICS_SCHEMA = Object.freeze({
+  audio_started: {
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
+    texture: ['tubular', 'church', 'bowl', 'crystal'],
+    latency: ['fast', 'warm', 'cold', 'slow'],
+  },
+  audio_failed: {
+    stage: ['initial', 'stream'],
+    reason: ['network', 'server', 'decode', 'timeout', 'unknown'],
+  },
+  listening_reached: {
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
+    duration: ['30s', '2m', '5m'],
+  },
+  export_completed: {
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
+    format: ['wav', 'flac', 'mp3'],
+    duration: ['30s', '1m', '2m', '3m', '4m'],
+  },
+  export_failed: {
+    stage: ['start', 'render', 'download'],
+    format: ['wav', 'flac', 'mp3'],
+  },
+});
+
+const pendingAnalyticsEvents = [];
+
+function analyticsIsConfigured() {
+  const isCanonicalPage = location.hostname === CAMPANA_ANALYTICS_HOST &&
+    (location.pathname === CAMPANA_ANALYTICS_PATH ||
+      location.pathname.startsWith(`${CAMPANA_ANALYTICS_PATH}/`));
+  return isCanonicalPage &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(CAMPANA_UMAMI_WEBSITE_ID);
+}
+
+function sendAnalyticsEvent(eventName, properties) {
+  if (typeof window.umami?.track !== 'function') return false;
+  window.umami.track(eventName, properties);
+  return true;
+}
+
+function initAnalytics() {
+  if (!analyticsIsConfigured() || document.querySelector('script[data-campana-analytics]')) return false;
+  const script = document.createElement('script');
+  script.defer = true;
+  script.src = CAMPANA_UMAMI_SCRIPT_URL;
+  script.dataset.websiteId = CAMPANA_UMAMI_WEBSITE_ID;
+  script.dataset.domains = CAMPANA_ANALYTICS_HOST;
+  script.dataset.tag = CAMPANA_ANALYTICS_TAG;
+  script.dataset.excludeSearch = 'true';
+  script.dataset.excludeHash = 'true';
+  script.dataset.doNotTrack = 'true';
+  script.dataset.campanaAnalytics = 'umami';
+  script.addEventListener('load', () => {
+    pendingAnalyticsEvents.splice(0).forEach(({ eventName, properties }) => {
+      sendAnalyticsEvent(eventName, properties);
+    });
+  });
+  document.head.appendChild(script);
+  return true;
+}
+
+function trackUsage(eventName, properties = {}) {
+  if (!analyticsIsConfigured()) return false;
+  const schema = CAMPANA_ANALYTICS_SCHEMA[eventName];
+  if (!schema) return false;
+  const props = {};
+  Object.entries(schema).forEach(([key, allowed]) => {
+    const value = String(properties[key] ?? '');
+    if (allowed.includes(value)) props[key] = value;
+  });
+  if (!sendAnalyticsEvent(eventName, props) && pendingAnalyticsEvents.length < 20) {
+    pendingAnalyticsEvents.push({ eventName, properties: props });
+  }
+  return true;
+}
+
+function analyticsPreset(value) {
+  const preset = value === 'giardino' ? 'festa' : String(value || '');
+  return CAMPANA_ANALYTICS_SCHEMA.audio_started.preset.includes(preset) ? preset : 'sera';
+}
+
+function analyticsLatency(milliseconds) {
+  if (milliseconds < 1500) return 'fast';
+  if (milliseconds < 5000) return 'warm';
+  if (milliseconds < 20000) return 'cold';
+  return 'slow';
+}
+
+function analyticsFailureReason(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (message.includes('timeout') || message.includes('timed out')) return 'timeout';
+  if (message.includes('decode') || message.includes('audio data')) return 'decode';
+  if (message.includes('server') || /\b5\d\d\b/.test(message)) return 'server';
+  if (message.includes('fetch') || message.includes('network') || message.includes('load failed')) return 'network';
+  return 'unknown';
+}
+
+function analyticsExportDuration(minutes) {
+  const labels = { '0.5': '30s', '1': '1m', '2': '2m', '3': '3m', '4': '4m' };
+  return labels[String(minutes)] || '1m';
+}
+
+initAnalytics();
 // ── Global error trap — shows JS errors in the status bar ──────────────────
 window.onerror = (msg, src, line) => {
   const el = document.getElementById('tStatus');
@@ -932,6 +1050,7 @@ let selPreset   = 'meditation';
 let presetDefs  = {};
 let sessionSeed = 42;
 let seedLocked  = false;
+let listeningMilestoneTimers = [];
 
 const FIRST_BEATS = 6;
 const CHUNK_BEATS = 12;
@@ -939,6 +1058,22 @@ const CROSSFADE   = 0.5;
 const PLAY_FADE   = 0.3;
 const STOP_FADE   = 0.5;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function clearListeningMilestones() {
+  listeningMilestoneTimers.forEach(clearTimeout);
+  listeningMilestoneTimers = [];
+}
+
+function scheduleListeningMilestones(token, preset) {
+  clearListeningMilestones();
+  [['30s', 30_000], ['2m', 120_000], ['5m', 300_000]].forEach(([duration, delay]) => {
+    listeningMilestoneTimers.push(setTimeout(() => {
+      if (isPlaying && token === playToken) {
+        trackUsage('listening_reached', { preset, duration });
+      }
+    }, delay));
+  });
+}
 
 // Sleep until audioCtx reaches targetTime, checking every 300 ms so stop
 // commands are responsive. Never sleeps if the target is already past.
@@ -1166,7 +1301,10 @@ async function streamLoop({buf: firstBuffer, events: firstEvents}, token) {
       if (!isPlaying || token !== playToken) break;
       setStatus('Buffering…', 'loading');
       try { chunk = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS); } catch (_) {}
-      if (!chunk) { await hardStop(); setStatus('Render error', ''); break; }
+      if (!chunk) {
+        trackUsage('audio_failed', { stage: 'stream', reason: analyticsFailureReason(e) });
+        await hardStop(); setStatus('Render error', ''); break;
+      }
     }
     if (!isPlaying || token !== playToken) break;
 
@@ -1184,6 +1322,7 @@ async function streamLoop({buf: firstBuffer, events: firstEvents}, token) {
 }
 
 async function hardStop() {
+  clearListeningMilestones();
   for (const c of activeChunks) {
     try { c.src.stop(); } catch(_) {}
     try { c.src.disconnect(); c.gain.disconnect(); } catch(_) {}
@@ -1206,7 +1345,14 @@ async function stopPlayback() {
 }
 
 async function startPlayback() {
-  await ensureAudio();
+  const playbackRequestedAt = performance.now();
+  try {
+    await ensureAudio();
+  } catch (err) {
+    trackUsage('audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
+    await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
+    return;
+  }
   // Set session seed: fixed (from input) or random (shown in input for reference)
   if (seedLocked) {
     sessionSeed = parseInt($('seedVal').value) || 42;
@@ -1225,11 +1371,20 @@ async function startPlayback() {
     const first = await fetchChunk(0, FIRST_BEATS);
     if (token !== playToken) return;
     setStatus('Playing', 'playing');
+    const analyticsPresetId = analyticsPreset(selPreset);
     streamLoop(first, token).catch(async err => {
       if (token !== playToken) return;
+      trackUsage('audio_failed', { stage: 'stream', reason: analyticsFailureReason(err) });
       await hardStop(); setStatus('Error: ' + err.message, '');
     });
+    trackUsage('audio_started', {
+      preset: analyticsPresetId,
+      texture: selTexture,
+      latency: analyticsLatency(performance.now() - playbackRequestedAt),
+    });
+    scheduleListeningMilestones(token, analyticsPresetId);
   } catch (err) {
+    trackUsage('audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
     await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
   }
 }
@@ -1247,6 +1402,7 @@ async function exportWav() {
   const fmt     = exportFormat || 'wav';
   $('exportBtn').disabled = true;
   setStatus('Starting render…', 'loading');
+  let exportStage = 'start';
   try {
     // 1. Start background render job — returns immediately with job_id
     const startR = await fetch(apiUrl('/api/render'), {
@@ -1260,6 +1416,7 @@ async function exportWav() {
     const { job_id } = await startR.json();
 
     // 2. Poll until done — deadline scales with duration
+    exportStage = 'render';
     const deadline = Date.now() + Math.max(180_000, minutes * 60_000 * 3);
     let status = 'pending', elapsed = 0;
     while (status === 'pending') {
@@ -1274,14 +1431,21 @@ async function exportWav() {
     }
 
     // 3. Download the finished file
+    exportStage = 'download';
     setStatus('Downloading…', 'loading');
     const dlR = await fetch(apiUrl(`/api/render/${job_id}/file`));
     if (!dlR.ok) throw new Error(`Download failed: ${dlR.status}`);
     const url = URL.createObjectURL(await dlR.blob());
     const a = document.createElement('a'); a.href = url;
     a.download = selPreset + '.' + fmt; a.click(); URL.revokeObjectURL(url);
+    trackUsage('export_completed', {
+      preset: analyticsPreset(selPreset),
+      format: fmt,
+      duration: analyticsExportDuration(minutes),
+    });
     setStatus('Downloaded ✓', 'playing');
   } catch (e) {
+    trackUsage('export_failed', { stage: exportStage, format: fmt });
     setStatus('Export error: ' + e.message, '');
   }
   $('exportBtn').disabled = false;
