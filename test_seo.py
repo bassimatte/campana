@@ -40,6 +40,16 @@ class SeoMetadataTests(unittest.TestCase):
                 )
                 self.assertEqual(canonicals, [expected])
 
+    def test_search_console_verification_matches_the_parent_site(self):
+        expected = "pp3jhptIHkhnjku-p-0sm3J4XAJzQlE7WiNZ2JwKUNA"
+        for path, html in self.targets.items():
+            with self.subTest(path=path):
+                tokens = re.findall(
+                    r'<meta name="google-site-verification" content="([^"]+)"\s*/>',
+                    html,
+                )
+                self.assertEqual(tokens, [expected])
+
     def test_page_has_one_descriptive_h1(self):
         for path, html in self.targets.items():
             with self.subTest(path=path):
