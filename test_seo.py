@@ -61,6 +61,19 @@ class SeoMetadataTests(unittest.TestCase):
                 self.assertEqual(data["@type"], "WebApplication")
                 self.assertEqual(data["name"], "Campana")
                 self.assertEqual(data["url"], "https://bassimatte.github.io/campana/")
+                self.assertEqual(
+                    data["author"],
+                    {
+                        "@type": "Person",
+                        "@id": "https://bassimatte.github.io/#person",
+                        "name": "Matteo Bassi",
+                        "url": "https://bassimatte.github.io/",
+                        "sameAs": [
+                            "https://github.com/bassimatte",
+                            "https://freesound.org/people/bassimat/",
+                        ],
+                    },
+                )
                 self.assertEqual(data["offers"]["price"], "0")
 
     def test_open_graph_metadata_has_a_public_social_card(self):
