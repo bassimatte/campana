@@ -1,5 +1,6 @@
 import re
 import json
+import struct
 import unittest
 from pathlib import Path
 
@@ -138,6 +139,27 @@ class SeoMetadataTests(unittest.TestCase):
                 )
                 self.assertEqual(len(personal_links), 2)
                 self.assertTrue(all("nofollow" not in link for link in personal_links))
+
+    def test_favicon_is_declared_and_deployed_in_both_apps(self):
+        expected_links = (
+            '<link rel="icon" type="image/png" sizes="512x512" '
+            'href="favicon.png" />',
+            '<link rel="apple-touch-icon" href="favicon.png" />',
+        )
+        for path, html in self.targets.items():
+            with self.subTest(path=path):
+                for link in expected_links:
+                    self.assertIn(link, html)
+
+        icon_paths = (
+            Path("engine/static/favicon.png"),
+            Path("docs/favicon.png"),
+        )
+        icons = [path.read_bytes() for path in icon_paths]
+        self.assertEqual(icons[0], icons[1])
+        self.assertEqual(icons[0][:8], b"\x89PNG\r\n\x1a\n")
+        width, height = struct.unpack(">II", icons[0][16:24])
+        self.assertEqual((width, height), (512, 512))
 
 
 if __name__ == "__main__":

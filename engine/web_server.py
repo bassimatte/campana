@@ -313,6 +313,15 @@ def _do_full_render(p: dict) -> bytes:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+@app.get("/favicon.png", include_in_schema=False)
+def favicon():
+    return FileResponse(
+        _STATIC_DIR / "favicon.png",
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
+
+
 @app.get("/")
 def index():
     return FileResponse(
