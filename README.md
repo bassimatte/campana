@@ -7,7 +7,8 @@ A browser-based bell synthesizer with additive synthesis, Freeverb reverb, stere
 Production API: https://campana-production.up.railway.app/
 
 ## Features
-- 4 bell textures: Tubular, Church, Singing Bowl, Crystal
+- 6 bell textures: Tubular, Church, Singing Bowl, Crystal, Bronze, Handbell
+- Preset-specific generative grammars, including monumental tolling and agile carillon patterns
 - Freeverb global reverb (8 comb + 4 allpass)
 - Stereo feedback delay with ping-pong
 - Time scatter: float notes freely off the beat grid

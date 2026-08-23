@@ -356,28 +356,6 @@ _NOTTE_BASS = [
     (40, 'C2',  20.0, 0.55),
 ]
 
-# Giardino — sparse, high register, pentatonic crystal
-_GIARDINO_MELODY = [
-    (0,    'G5',  2.5,  0.68),
-    (3,    'C5',  2.0,  0.63),
-    (6,    'Eb5', 3.0,  0.70),
-    (10,   'G5',  2.0,  0.66),
-    (13,   'F5',  2.5,  0.70),
-    (16,   'C5',  2.5,  0.72),
-    (20,   'Eb5', 2.0,  0.68),
-    (23,   'G5',  3.0,  0.76),
-    (27,   'Bb5', 2.0,  0.70),
-    (30,   'G5',  2.5,  0.68),
-    (33,   'Eb5', 2.0,  0.63),
-    (36,   'C5',  6.0,  0.78),
-]
-_GIARDINO_BASS = [
-    (0,  'C3',  12.0, 0.32),
-    (12, 'G2',  12.0, 0.30),
-    (24, 'F2',  12.0, 0.32),
-    (36, 'C2',   6.0, 0.36),
-]
-
 # Aurora — slow whole-tone ascending arc, dreamy shimmer
 _AURORA_MELODY = [
     (0,   'C5',  5.0,  0.68),
@@ -517,40 +495,38 @@ PRESETS = {
     },
     "cattedrale": {
         "name":            "Cattedrale",
-        "description":     "Cathedral toll — deep church bells, heavy reverb, forceful strike transient",
+        "description":     "Monumental bronze tolls — physical clapper strikes, deep resonance, and long silences",
         "melody":          _CATTEDRALE_MELODY,
         "bass":            _CATTEDRALE_BASS,
         "total_beats":     150,
-        "default_bpm":     30,
+        "default_bpm":     28,
         "default_key":     "D",
         "default_scale_mode": "minor",
         "default_shimmer": 0.0,
         "default_reverb":  0.95,
-        "default_decay":   2.3,
-        "default_texture": "church",
-        "default_reverb_damping": 0.7,
+        "default_decay":   2.5,
+        "default_texture": "bronze",
+        "default_reverb_damping": 0.72,
         "default_reverb_width":   0.95,
-        "default_reverb_wet":     0.60,
+        "default_reverb_wet":     0.58,
         "default_delay_time":     300,
         "default_delay_feedback": 0.35,
         "default_delay_wet":      0.0,
-        "default_beating":        0.1,
-        "default_strike":         0.6,
+        "default_beating":        0.22,
+        "default_strike":         0.82,
         "default_attack_ms":      0,
-        "default_humanize":       0.1,
-        "default_density":        0.85,
+        "default_humanize":       0.08,
+        "default_density":        1.0,
         "default_octave_spread":  0.0,
         "default_base_octave":    0,
         "default_time_scatter":   0.0,
         "gen_params": {
-            "melody_octaves":     [2, 3, 4],
-            "bass_octaves":       [1, 2],
-            "note_spacing_range": (2.5, 6.0),
-            "bass_spacing_range": (5.0, 12.0),
-            "velocity_base":      0.65,
-            "bass_velocity_base": 0.55,
-            "walk_bias":          0,
-            "bass_enabled":       True,
+            "style":               "tolling",
+            "melody_octaves":     [2, 3],
+            "toll_pattern":       [0.0, 6.5, 13.0],
+            "velocity_base":      0.82,
+            "response_probability": 0.28,
+            "bass_enabled":       False,
         },
     },
     "deriva": {
@@ -629,41 +605,40 @@ PRESETS = {
             "bass_enabled":       True,
         },
     },
-    "giardino": {
+    "festa": {
         "name":            "Festa",
-        "description":     "Bright and joyful — fast C major arpeggios with crisp tubular bells",
+        "description":     "Bright handbell carillon — agile C-major motifs, counterpoint, and crisp rhythmic accents",
         "melody":          _FESTA_MELODY,
         "bass":            _FESTA_BASS,
         "total_beats":     450,
-        "default_bpm":     90,
+        "default_bpm":     104,
         "default_key":     "C",
         "default_scale_mode": "major",
         "default_shimmer": 0.0,
-        "default_reverb":  0.45,
-        "default_decay":   0.8,
-        "default_texture": "tubular",
-        "default_reverb_damping": 0.55,
-        "default_reverb_width":   0.70,
-        "default_reverb_wet":     0.22,
-        "default_delay_time":     200,
-        "default_delay_feedback": 0.25,
-        "default_delay_wet":      0.0,
+        "default_reverb":  0.38,
+        "default_decay":   0.65,
+        "default_texture": "handbell",
+        "default_reverb_damping": 0.48,
+        "default_reverb_width":   0.76,
+        "default_reverb_wet":     0.18,
+        "default_delay_time":     175,
+        "default_delay_feedback": 0.18,
+        "default_delay_wet":      0.06,
         "default_beating":        0.0,
-        "default_strike":         0.25,
+        "default_strike":         0.42,
         "default_attack_ms":      0,
-        "default_humanize":       0.20,
+        "default_humanize":       0.10,
         "default_density":        1.0,
         "default_octave_spread":  0.0,
         "default_base_octave":    0,
         "default_time_scatter":   0.0,
         "gen_params": {
-            "melody_octaves":     [3, 4, 5, 6],
-            "bass_octaves":       [1, 2, 3],
-            "note_spacing_range": (0.25, 0.75),
-            "bass_spacing_range": (1.5, 3.0),
-            "velocity_base":      0.70,
-            "bass_velocity_base": 0.55,
-            "walk_bias":          1,
+            "style":               "carillon",
+            "melody_octaves":     [4, 5, 6],
+            "bass_octaves":       [3, 4],
+            "velocity_base":      0.72,
+            "bass_velocity_base": 0.52,
+            "variation_probability": 0.35,
             "bass_enabled":       True,
         },
     },
@@ -706,6 +681,16 @@ PRESETS = {
         },
     },
 }
+
+# Public preset IDs are canonical. Keep this narrow alias at the API boundary so
+# old bookmarks or clients that still send the former internal name continue to
+# render Festa without exposing a duplicate preset in /api/presets.
+PRESET_ALIASES = {"giardino": "festa"}
+
+
+def resolve_preset_id(value: str) -> str:
+    preset_id = str(value or "sera")
+    return PRESET_ALIASES.get(preset_id, preset_id)
 
 KEYS = {
     # Chromatic roots (primary — used by UI)

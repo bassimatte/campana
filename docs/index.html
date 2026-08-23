@@ -3,7 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Campana</title>
+  <title>Campana – Generative Bell Synthesizer &amp; Ambient Soundscapes</title>
+  <meta name="description" content="Create endless, evolving bell soundscapes in your browser with Campana, a free generative synthesizer with customizable tones, spatial effects, and audio export." />
+  <link rel="canonical" href="https://bassimatte.github.io/campana/" />
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "Campana",
+    "url": "https://bassimatte.github.io/campana/",
+    "description": "A free generative bell synthesizer for creating endless, evolving ambient soundscapes in your browser.",
+    "applicationCategory": "MultimediaApplication",
+    "operatingSystem": "Any",
+    "browserRequirements": "Requires a modern browser with JavaScript and Web Audio support",
+    "author": {
+      "@type": "Person",
+      "name": "Matteo Bassi"
+    },
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "EUR"
+    }
+  }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
@@ -80,6 +103,11 @@
     .app-name {
       font-size: 13px; font-weight: 600; letter-spacing: 0.22em;
       text-transform: uppercase; color: var(--accent);
+    }
+    .brand-title { display: flex; align-items: baseline; gap: 6px; }
+    .app-tagline {
+      margin-top: 3px; color: var(--muted); font-size: 10px;
+      font-weight: 400; letter-spacing: 0.025em;
     }
     .app-byline {
       font-size: 11px; font-weight: 400; letter-spacing: 0.04em;
@@ -198,6 +226,8 @@
       background: var(--seg-active); color: var(--accent);
       box-shadow: var(--seg-shadow); font-weight: 600;
     }
+    #textureSeg { flex-wrap: wrap; }
+    #textureSeg .seg-btn { flex: 1 1 30%; }
 
     /* ── Slider grid ── */
     .grid2 {
@@ -410,8 +440,11 @@
 
   <!-- Header -->
   <div class="hdr">
-    <div style="display:flex;align-items:baseline;gap:6px">
-      <span class="app-name">Campana</span><span class="app-byline">by Matteo Bassi</span>
+    <div>
+      <div class="brand-title">
+        <h1 class="app-name">Campana</h1><span class="app-byline">by Matteo Bassi</span>
+      </div>
+      <p class="app-tagline">Generative bell synthesizer &amp; ambient soundscapes</p>
     </div>
     <div class="hdr-right">
       <span class="status-dot" id="statusDot"></span>
@@ -441,7 +474,7 @@
       <button class="pill"        id="pill-cattedrale"    onclick="selectPreset('cattedrale')">Cattedrale</button>
       <button class="pill"        id="pill-deriva"        onclick="selectPreset('deriva')">Deriva</button>
       <button class="pill"        id="pill-notte"         onclick="selectPreset('notte')">Notte</button>
-      <button class="pill"        id="pill-giardino"      onclick="selectPreset('giardino')">Festa</button>
+      <button class="pill"        id="pill-festa"         onclick="selectPreset('festa')">Festa</button>
       <button class="pill"        id="pill-aurora"        onclick="selectPreset('aurora')">Aurora</button>
     </div>
 
@@ -460,6 +493,8 @@
         <button class="seg-btn"        data-val="church"  onclick="setTexture('church')">Church</button>
         <button class="seg-btn"        data-val="bowl"    onclick="setTexture('bowl')">Bowl</button>
         <button class="seg-btn"        data-val="crystal" onclick="setTexture('crystal')">Crystal</button>
+        <button class="seg-btn"        data-val="bronze"  onclick="setTexture('bronze')">Bronze</button>
+        <button class="seg-btn"        data-val="handbell" onclick="setTexture('handbell')">Handbell</button>
       </div>
       <div class="grid2">
         <div class="sfield">
@@ -696,12 +731,14 @@
       <p>Campana is a generative bell synthesizer that creates endlessly evolving, looping bell soundscapes directly in your browser. Each preset is a living composition — never exactly the same twice.</p>
 
       <h3>Sound Engine</h3>
-      <p>Every bell tone is built from scratch using <strong>additive synthesis</strong>: a set of inharmonic partial frequencies characteristic of real bells are summed and shaped with individual amplitude envelopes. Four textures model different bell families:</p>
+      <p>Every bell tone is built from scratch using <strong>additive synthesis</strong>: a set of inharmonic partial frequencies characteristic of real bells are summed and shaped with individual amplitude envelopes. Six textures model different bell families:</p>
       <ul>
         <li><strong>Tubular</strong> — steel tube bells, bright attack</li>
         <li><strong>Church</strong> — cast bronze, deep fundamental</li>
         <li><strong>Bowl</strong> — Tibetan singing bowls, slowly beating partials</li>
         <li><strong>Crystal</strong> — glass harmonics, high shimmer</li>
+        <li><strong>Bronze</strong> — monumental cast bells with hum, tierce, quint, and nominal partials</li>
+        <li><strong>Handbell</strong> — compact, agile carillon bells with fast upper-partial decay</li>
       </ul>
 
       <h3>Effects Chain</h3>
@@ -718,10 +755,10 @@
         <li><strong>Sera</strong> — Dusk church bells in D minor. Rich, warm strikes with deep reverb.</li>
         <li><strong>Tempio</strong> — Tibetan singing bowls in G dorian. Slow, beating partials that shimmer and breathe.</li>
         <li><strong>Cristallo</strong> — Crystal glass harmonics in B♭ pentatonic. Airy shimmer and scattered timing.</li>
-        <li><strong>Cattedrale</strong> — Cathedral tolls in D minor. The heaviest reverb, slowest pace, widest stereo field.</li>
+        <li><strong>Cattedrale</strong> — Monumental bronze tolls in D minor. Physical clapper strikes emerge from long silences.</li>
         <li><strong>Deriva</strong> — Floating, untethered bells in E♭ minor. Maximum scatter — notes drift freely off the grid.</li>
         <li><strong>Notte</strong> — Dark, low-register bells in F minor. Sparse and contemplative, ideal for late hours.</li>
-        <li><strong>Festa</strong> — Bright C major arpeggios at 90 BPM. Joyful tubular bells with a jubilant high-register finale.</li>
+        <li><strong>Festa</strong> — Agile C-major handbell counterpoint at 104 BPM, shaped as recognizable carillon phrases.</li>
         <li><strong>Aurora</strong> — Whole-tone scale ascending and descending arc in D. Dreamy, ambiguous harmony with shimmer.</li>
       </ul>
 
@@ -752,7 +789,7 @@ const CAMPANA_UMAMI_SCRIPT_URL = 'https://cloud.umami.is/script.js';
 const CAMPANA_ANALYTICS_SCHEMA = Object.freeze({
   campana_audio_started: {
     preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
-    texture: ['tubular', 'church', 'bowl', 'crystal'],
+    texture: ['tubular', 'church', 'bowl', 'crystal', 'bronze', 'handbell'],
     latency: ['fast', 'warm', 'cold', 'slow'],
   },
   campana_audio_failed: {
@@ -1456,10 +1493,10 @@ const PRESETS_LIST = [
   { id:'sera',         name:'Sera',        default_bpm:45,  default_key:'D',  default_scale_mode:'minor',      default_reverb:0.82, default_decay:1.8,  default_texture:'church',  default_reverb_damping:0.55, default_reverb_width:0.9,  default_reverb_wet:0.45, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0,    default_strike:0.4, default_attack_ms:0, default_humanize:0.15, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'tempio',       name:'Tempio',      default_bpm:35,  default_key:'G',  default_scale_mode:'dorian',     default_reverb:0.88, default_decay:2.2,  default_texture:'bowl',    default_reverb_damping:0.6,  default_reverb_width:0.95, default_reverb_wet:0.55, default_delay_time:420, default_delay_feedback:0.4,  default_delay_wet:0,    default_shimmer:0.1,  default_beating:0.45, default_strike:0,   default_attack_ms:8, default_humanize:0.25, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'cristallo',    name:'Cristallo',   default_bpm:60,  default_key:'Bb', default_scale_mode:'pentatonic', default_reverb:0.70, default_decay:1.2,  default_texture:'crystal', default_reverb_damping:0.25, default_reverb_width:0.95, default_reverb_wet:0.40, default_delay_time:275, default_delay_feedback:0.5,  default_delay_wet:0.25, default_shimmer:0.35, default_beating:0.2,  default_strike:0,   default_attack_ms:5, default_humanize:0.3,  default_density:0.9,  default_octave_spread:1.0, default_base_octave:1,  default_time_scatter:0.15 },
-  { id:'cattedrale',   name:'Cattedrale',  default_bpm:30,  default_key:'D',  default_scale_mode:'minor',      default_reverb:0.95, default_decay:2.3,  default_texture:'church',  default_reverb_damping:0.7,  default_reverb_width:0.95, default_reverb_wet:0.60, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0.1,  default_strike:0.6, default_attack_ms:0, default_humanize:0.1,  default_density:0.85, default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'cattedrale',   name:'Cattedrale',  default_bpm:28,  default_key:'D',  default_scale_mode:'minor',      default_reverb:0.95, default_decay:2.5,  default_texture:'bronze',  default_reverb_damping:0.72, default_reverb_width:0.95, default_reverb_wet:0.58, default_delay_time:300, default_delay_feedback:0.35, default_delay_wet:0,    default_shimmer:0,    default_beating:0.22, default_strike:0.82,default_attack_ms:0, default_humanize:0.08, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'deriva',       name:'Deriva',      default_bpm:50,  default_key:'Eb', default_scale_mode:'minor',      default_reverb:0.78, default_decay:1.5,  default_texture:'crystal', default_reverb_damping:0.35, default_reverb_width:0.90, default_reverb_wet:0.42, default_delay_time:350, default_delay_feedback:0.55, default_delay_wet:0.28, default_shimmer:0.2,  default_beating:0.15, default_strike:0,   default_attack_ms:8, default_humanize:0.5,  default_density:0.85, default_octave_spread:1.5, default_base_octave:0,  default_time_scatter:0.65 },
   { id:'notte',        name:'Notte',       default_bpm:40,  default_key:'F',  default_scale_mode:'minor',      default_reverb:0.85, default_decay:1.9,  default_texture:'tubular', default_reverb_damping:0.5,  default_reverb_width:0.85, default_reverb_wet:0.48, default_delay_time:480, default_delay_feedback:0.42, default_delay_wet:0.18, default_shimmer:0,    default_beating:0.35, default_strike:0.2, default_attack_ms:0, default_humanize:0.1,  default_density:0.9,  default_octave_spread:0,   default_base_octave:-1, default_time_scatter:0    },
-  { id:'giardino',     name:'Festa',       default_bpm:90,  default_key:'C',  default_scale_mode:'major',      default_reverb:0.45, default_decay:0.8,  default_texture:'tubular', default_reverb_damping:0.55, default_reverb_width:0.70, default_reverb_wet:0.22, default_delay_time:200, default_delay_feedback:0.25, default_delay_wet:0,    default_shimmer:0,    default_beating:0,    default_strike:0.25,default_attack_ms:0, default_humanize:0.20, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
+  { id:'festa',        name:'Festa',       default_bpm:104, default_key:'C',  default_scale_mode:'major',      default_reverb:0.38, default_decay:0.65, default_texture:'handbell',default_reverb_damping:0.48, default_reverb_width:0.76, default_reverb_wet:0.18, default_delay_time:175, default_delay_feedback:0.18, default_delay_wet:0.06, default_shimmer:0,    default_beating:0,    default_strike:0.42,default_attack_ms:0, default_humanize:0.10, default_density:1.0,  default_octave_spread:0,   default_base_octave:0,  default_time_scatter:0    },
   { id:'aurora',       name:'Aurora',      default_bpm:45,  default_key:'D',  default_scale_mode:'whole_tone', default_reverb:0.80, default_decay:1.6,  default_texture:'crystal', default_reverb_damping:0.20, default_reverb_width:0.98, default_reverb_wet:0.50, default_delay_time:320, default_delay_feedback:0.52, default_delay_wet:0.30, default_shimmer:0.40, default_beating:0.08, default_strike:0,   default_attack_ms:8, default_humanize:0.20, default_density:0.95, default_octave_spread:0.8, default_base_octave:0,  default_time_scatter:0.10 },
 ];
 

@@ -31,7 +31,7 @@ except ImportError:
 
 import numpy as np
 from .synth import render_chunk, render_track, stereo_to_wav_bytes, generate_bell_events, _LOOKAHEAD_BEATS, note_freq, transpose_note
-from .presets import PRESETS, KEYS, SCALES
+from .presets import PRESETS, KEYS, SCALES, resolve_preset_id
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_DIR.mkdir(exist_ok=True)
@@ -110,7 +110,7 @@ def _epoch_events(scale_mode: str, gen_params: dict, seed_base: int,
 
 def _parse_render_params(body: dict) -> dict:
     return dict(
-        preset_id        = body.get("preset", "meditation"),
+        preset_id        = resolve_preset_id(body.get("preset", "sera")),
         bpm              = float(body.get("bpm", 50)),
         key              = body.get("key", "C minor"),
         reverb_room      = float(body.get("reverb_room", 0.5)),

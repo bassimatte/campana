@@ -36,6 +36,21 @@ BELL_TEXTURES: dict = {
         (1.000, 1.00, 3.5), (3.200, 0.50, 2.0),
         (6.800, 0.22, 1.0), (11.00, 0.10, 0.5),  (17.50, 0.04, 0.25),
     ],
+    # Large cast-bronze bell. The sub-fundamental hum and clustered tierce,
+    # quint, and nominal partials give Cattedrale weight without relying on EQ.
+    "bronze": [
+        (0.500, 0.42, 8.0), (1.000, 1.00, 6.5), (1.198, 0.62, 4.8),
+        (1.506, 0.42, 3.8), (2.000, 0.70, 3.2), (2.416, 0.30, 2.4),
+        (3.010, 0.22, 1.7), (4.080, 0.15, 1.0), (5.430, 0.09, 0.55),
+        (7.120, 0.05, 0.28),
+    ],
+    # Small handbell/carillon voice: fast upper-partial decay and a clear,
+    # bright nominal make dense Festa patterns articulate rather than smear.
+    "handbell": [
+        (1.000, 1.00, 2.2), (1.190, 0.38, 1.45), (1.505, 0.24, 1.0),
+        (2.000, 0.52, 0.85), (2.720, 0.26, 0.55), (3.980, 0.18, 0.34),
+        (5.620, 0.10, 0.20), (8.100, 0.05, 0.11),
+    ],
 }
 _BASE_PARTIALS = BELL_TEXTURES["tubular"]  # kept for compatibility
 
@@ -127,10 +142,12 @@ def apply_scale_quantize(events: list, root_semitone: int, scale: str) -> list:
 def bell_tone(freq: float, duration: float, velocity: float = 1.0,
               decay_mult: float = 1.0, texture: str = "tubular",
               attack_ms: float = 0.0, beating: float = 0.0,
-              strike_level: float = 0.0) -> np.ndarray:
+              strike_level: float = 0.0,
+              variation_seed=None) -> np.ndarray:
     partials = BELL_TEXTURES.get(texture, BELL_TEXTURES["tubular"])
     n_partials = len(partials)
-    rng = np.random.default_rng(int(freq * 137) % (2**31))
+    seed = int(freq * 137) if variation_seed is None else int(variation_seed + freq * 137)
+    rng = np.random.default_rng(abs(seed) % (2**31))
     n   = int(SAMPLE_RATE * duration)
     t   = np.linspace(0, duration, n, endpoint=False)
     sig = np.zeros(n, dtype=np.float64)
@@ -142,9 +159,21 @@ def bell_tone(freq: float, duration: float, velocity: float = 1.0,
         # Velocity-dependent brightness: harder strikes excite higher partials more.
         brightness = 1.0 + (vel_eff - 0.5) * 2.0 * (i / max(1, n_partials - 1)) * 0.7
         eff_amp    = amp * max(0.02, brightness)
-        detuning   = rng.uniform(-0.003, 0.003) * beating
+        detuning   = rng.uniform(-0.0015, 0.0015) * beating
         env  = np.exp(-t / (tau * decay_mult))
-        sig += eff_amp * np.sin(2 * np.pi * freq * ratio * (1.0 + detuning) * t) * env
+        partial_freq = freq * ratio * (1.0 + detuning)
+        if partial_freq >= SAMPLE_RATE * 0.48:
+            continue
+        if beating > 0.0:
+            # A close oscillator pair creates actual slow amplitude beating.
+            spread = beating * (0.00012 + i * 0.00008)
+            wave = 0.5 * (
+                np.sin(2 * np.pi * partial_freq * (1.0 - spread) * t) +
+                np.sin(2 * np.pi * partial_freq * (1.0 + spread) * t)
+            )
+        else:
+            wave = np.sin(2 * np.pi * partial_freq * t)
+        sig += eff_amp * wave * env
     # Soft-attack envelope
     if attack_ms > 0.0:
         ramp_n = min(int(attack_ms * SAMPLE_RATE / 1000), n)
@@ -413,9 +442,11 @@ def render_track(events: list, total_beats: float,
         start      = max(0, int(t * SAMPLE_RATE))
         vel_scaled = float(np.clip(vel * rng.uniform(1 - 0.25 * humanize, 1 + 0.1 * humanize), 0.05, 1.0))
         note_atk   = attack_ms * rng.uniform(0.5, 1.5) if humanize > 0 else attack_ms
+        strike_seed = _strike_variation_seed(beat)
         tone       = bell_tone(freq, dur_s, velocity=vel_scaled, decay_mult=decay_mult,
                                texture=texture, attack_ms=note_atk,
-                               beating=beating, strike_level=strike_level)
+                               beating=beating, strike_level=strike_level,
+                               variation_seed=strike_seed)
 
         base_pan   = np.clip((freq - 400) / 1200 * pan_spread, -0.5, 0.5)
         pan        = base_pan + rng.uniform(-0.05, 0.05)
@@ -442,6 +473,7 @@ def generate_bell_events(scale_mode: str, total_beats: float,
     existing transpose_events() call moves them into the user's chosen key.
 
     gen_params keys:
+      style                 "walk" (default), "tolling", or "carillon"
       melody_octaves       list of MIDI octave numbers for the melody voice
       bass_octaves         list of MIDI octave numbers for the bass voice
       note_spacing_range   (lo, hi) beats between successive melody strikes
@@ -450,6 +482,9 @@ def generate_bell_events(scale_mode: str, total_beats: float,
       bass_velocity_base   base velocity for bass (0-1)
       walk_bias            -1 descending / 0 neutral / 1 ascending
       bass_enabled         bool
+
+    Specialized styles additionally consume toll_pattern and
+    response_probability (tolling), or variation_probability (carillon).
     """
     rng     = np.random.default_rng(seed)
     degrees = SCALES.get(scale_mode, SCALES["minor"])
@@ -469,6 +504,96 @@ def generate_bell_events(scale_mode: str, total_beats: float,
     bass_pool   = build_pool(gen_params.get("bass_octaves",   [1, 2]))
 
     events: list = []
+
+    style = gen_params.get("style", "walk")
+
+    if style == "tolling":
+        # A sparse, low-register ritual grammar for Cattedrale. Each 16-beat
+        # epoch keeps the same root/fifth/tierce contour but varies weight,
+        # timing, and the occasional distant response.
+        toll_pattern = gen_params.get("toll_pattern", [0.0, 6.5, 13.0])
+        octaves = gen_params.get("melody_octaves", [2, 3])
+        velocity_base = gen_params.get("velocity_base", 0.82)
+        response_probability = gen_params.get("response_probability", 0.25)
+        degree_positions = [0, 4, 2]  # root, fifth, tierce in a heptatonic scale
+
+        for strike_index, nominal_beat in enumerate(toll_pattern):
+            beat = max(0.0, float(nominal_beat + rng.uniform(-0.16, 0.16)))
+            if beat >= total_beats:
+                continue
+            degree = degrees[degree_positions[strike_index % len(degree_positions)] % len(degrees)]
+            octave = octaves[0] if strike_index != 1 else octaves[min(1, len(octaves) - 1)]
+            note = midi_to_name((octave + 1) * 12 + degree)
+            duration = float(rng.uniform(4.5, 7.5))
+            velocity = float(np.clip(
+                velocity_base + (0.08 if strike_index == 0 else 0.0) + rng.uniform(-0.05, 0.05),
+                0.45, 1.0))
+            events.append((beat, note, duration, velocity))
+
+            if rng.random() < response_probability:
+                response_beat = beat + float(rng.uniform(1.35, 2.15))
+                if response_beat < total_beats:
+                    response_degree = degrees[(degree_positions[strike_index % 3] + 2) % len(degrees)]
+                    response_octave = octaves[min(1, len(octaves) - 1)]
+                    response_note = midi_to_name((response_octave + 1) * 12 + response_degree)
+                    events.append((response_beat, response_note, 2.5,
+                                   float(np.clip(velocity * 0.58, 0.25, 0.65))))
+        return sorted(events, key=lambda e: e[0])
+
+    if style == "carillon":
+        # A repeating four-bar harmonic sentence for Festa. The recognizable
+        # arpeggio survives from epoch to epoch while small seeded variations
+        # keep the carillon alive rather than looped.
+        melody_octaves = gen_params.get("melody_octaves", [4, 5, 6])
+        bass_octaves = gen_params.get("bass_octaves", [3, 4])
+        velocity_base = gen_params.get("velocity_base", 0.72)
+        bass_velocity = gen_params.get("bass_velocity_base", 0.52)
+        variation_probability = gen_params.get("variation_probability", 0.35)
+        progression = [0, 3, 4, 0]  # I – IV – V – I
+        base_pattern = [0, 1, 2, 3, 2, 1, 2, 3]
+
+        def scale_midi(degree_position: int, octave: int) -> int:
+            octave_add, degree_index = divmod(degree_position, len(degrees))
+            return (octave + octave_add + 1) * 12 + degrees[degree_index]
+
+        bar = 0
+        bar_start = 0.0
+        while bar_start < total_beats:
+            root_position = progression[bar % len(progression)]
+            chord_positions = [
+                root_position, root_position + 2, root_position + 4,
+                root_position + len(degrees),
+            ]
+            pattern = list(base_pattern)
+            if rng.random() < variation_probability:
+                if rng.random() < 0.5:
+                    pattern[4:] = reversed(pattern[4:])
+                else:
+                    pattern = pattern[2:] + pattern[:2]
+
+            melody_octave = melody_octaves[min(bar % 2, len(melody_octaves) - 1)]
+            for step_index, chord_index in enumerate(pattern):
+                beat = bar_start + step_index * 0.5
+                if beat >= total_beats:
+                    break
+                midi = scale_midi(chord_positions[chord_index], melody_octave)
+                velocity = float(np.clip(
+                    velocity_base + (0.14 if step_index in (0, 6) else 0.0) +
+                    rng.uniform(-0.04, 0.04), 0.35, 1.0))
+                events.append((beat, midi_to_name(midi), 0.42, velocity))
+
+            if gen_params.get("bass_enabled", True):
+                bass_octave = bass_octaves[bar % len(bass_octaves)]
+                for beat_offset, degree_offset in ((0.0, 0), (2.0, 4)):
+                    beat = bar_start + beat_offset
+                    if beat < total_beats:
+                        midi = scale_midi(root_position + degree_offset, bass_octave)
+                        events.append((beat, midi_to_name(midi), 1.4,
+                                       float(np.clip(bass_velocity + rng.uniform(-0.03, 0.03),
+                                                     0.25, 0.75))))
+            bar += 1
+            bar_start += 4.0
+        return sorted(events, key=lambda e: e[0])
 
     def walk_step(rng, pos: int, pool_size: int, steps, weights,
                   leap_prob: float = 0.12) -> int:
@@ -541,6 +666,11 @@ _LOOKAHEAD_BEATS = 8.0  # look back this many beats for reverb tails (gapless lo
 _STEREO_MICRO    = 0.0012  # L/R frequency offset ≈ 2 cents → ~0.3–2.5 Hz natural beating
 
 
+def _strike_variation_seed(absolute_beat: float) -> int:
+    """Stable timbre seed for a strike, including when its tail is regenerated."""
+    return int(round(absolute_beat * 1000.0)) * 7919
+
+
 def render_chunk(events: list, beat_offset: float, chunk_beats: float,
                  total_beats: float, bpm: float = 60.0,
                  reverb_room: float = 0.5, reverb_damping: float = 0.4,
@@ -599,13 +729,18 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
             vel * (rng.uniform(1 - 0.25 * humanize, 1 + 0.1 * humanize) if is_normal else 1.0),
             0.05, 1.0))
         note_atk   = attack_ms * rng.uniform(0.5, 1.5) if (humanize > 0 and is_normal) else attack_ms
-        # Render L and R at slightly different frequencies — creates natural beating/width
+        # Render L and R at slightly different frequencies — creates natural beating/width.
+        # The absolute beat keeps a regenerated lookahead tail timbrally stable
+        # across chunk boundaries while successive strikes still vary.
+        strike_seed = _strike_variation_seed(beat_offset + rel_beat)
         l_tone = bell_tone(freq * (1 + _STEREO_MICRO), dur_s, velocity=vel_scaled,
                            decay_mult=decay_mult, texture=texture, attack_ms=note_atk,
-                           beating=beating, strike_level=strike_level if is_normal else 0.0)
+                           beating=beating, strike_level=strike_level if is_normal else 0.0,
+                           variation_seed=strike_seed)
         r_tone = bell_tone(freq * (1 - _STEREO_MICRO), dur_s, velocity=vel_scaled,
                            decay_mult=decay_mult, texture=texture, attack_ms=note_atk,
-                           beating=beating, strike_level=strike_level if is_normal else 0.0)
+                           beating=beating, strike_level=strike_level if is_normal else 0.0,
+                           variation_seed=strike_seed + 1)
 
         if is_normal and time_scatter > 0:
             grid_t     = rel_beat * beat_dur + jitter

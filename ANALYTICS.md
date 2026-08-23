@@ -41,8 +41,9 @@ session replay or heatmaps for Campana.
 | `campana_export_failed` | Export start, render, or download failed | `stage`, `format` |
 
 Preset analytics use the public values `sera`, `tempio`, `cristallo`,
-`cattedrale`, `deriva`, `notte`, `festa`, and `aurora`. The legacy internal ID
-`giardino` is mapped to `festa` before an event is sent.
+`cattedrale`, `deriva`, `notte`, `festa`, and `aurora`. The deprecated
+`giardino` request alias is canonicalized to `festa` at the API and analytics
+boundaries.
 
 ## Shared Umami website
 
