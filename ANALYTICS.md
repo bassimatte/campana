@@ -34,11 +34,13 @@ session replay or heatmaps for Campana.
 
 | Event | Meaning | Allowed properties |
 |---|---|---|
+| `campana_play_requested` | The visitor requested playback | `preset`, `texture` |
 | `campana_audio_started` | The first audio chunk was decoded and scheduled | `preset`, `texture`, latency bucket |
-| `campana_audio_failed` | Initial playback or continued streaming failed | `stage`, coarse `reason` |
+| `campana_audio_failed` | Initial playback or continued streaming failed | `stage`, coarse `reason`, `preset`, `texture` |
 | `campana_listening_reached` | Active playback reached 30 seconds, 2 minutes, or 5 minutes | `preset`, `duration` |
+| `campana_export_started` | The visitor started an export render | `preset`, `format`, `duration` |
 | `campana_export_completed` | The rendered download was prepared successfully | `preset`, `format`, `duration` |
-| `campana_export_failed` | Export start, render, or download failed | `stage`, `format` |
+| `campana_export_failed` | Export start, render, or download failed | `stage`, `preset`, `format`, `duration` |
 
 Preset analytics use the public values `sera`, `tempio`, `cristallo`,
 `cattedrale`, `deriva`, `notte`, `festa`, and `aurora`. The deprecated
@@ -72,13 +74,18 @@ Primary funnel:
 
 ```text
 Page view
+  -> campana_play_requested
   -> campana_audio_started
   -> campana_listening_reached (30s)
   -> campana_listening_reached (2m)
+  -> campana_export_started
   -> campana_export_completed
 ```
 
-Keep the **Tag = campana** filter applied, then break down
-`campana_audio_started`, `campana_listening_reached`, and
+Keep the **Tag = campana** filter applied. Compare `campana_play_requested` with
+`campana_audio_started` to measure playback startup success, and compare
+`campana_export_started` with `campana_export_completed` to measure export
+completion. Break down `campana_audio_started`, `campana_listening_reached`, and
 `campana_export_completed` by the `preset` property to compare actual preset
-usage and depth of listening.
+usage and depth of listening. Failure events can be broken down by their coarse
+stage and reason fields, then by preset, without collecting raw error messages.

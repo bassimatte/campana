@@ -141,6 +141,9 @@
       text-decoration: none;
       transition: color 0.2s ease;
     }
+    .app-byline.creator-link {
+      color: var(--text);
+    }
     .creator-link:hover,
     .creator-link:focus-visible {
       color: var(--accent);
@@ -799,7 +802,7 @@
       <p>Audio is synthesised server-side in Python (NumPy/SciPy) and streamed to the browser as WAV chunks via a FastAPI backend. The Web Audio API schedules chunks gaplessly using a two-chunk prefetch buffer. Exports are rendered in 32-beat chunks through an async job queue, keeping peak memory under 250 MB regardless of duration.</p>
 
       <h3>Privacy</h3>
-      <p>The public Campana website uses <a href="https://umami.is/" target="_blank" rel="noopener" style="color:var(--accent)">Umami</a> for anonymous, aggregate usage statistics. It records successful playback, broad listening-duration milestones, and completed exports so the project can be improved. Campana does not send seeds, control values, filenames, audio, or exact error messages. Analytics is disabled for local installations, repository forks, and the Railway backend.</p>
+      <p>The public Campana website uses <a href="https://umami.is/" target="_blank" rel="noopener" style="color:var(--accent)">Umami</a> for anonymous, aggregate usage statistics. It records playback and export attempts, successful playback, broad listening-duration milestones, completed exports, and coarse failure categories so the project can be improved. Campana does not send seeds, control values, filenames, audio, or exact error messages. Analytics is disabled for local installations, repository forks, and the Railway backend.</p>
     </div>
     <div class="modal-foot">48 kHz · 16-bit stereo · generative · infinite<br>Created by <a href="https://freesound.org/people/bassimat/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Matteo Bassi</a><br><a class="creator-link" href="https://bassimatte.github.io/#instruments">More tools by Matteo Bassi ↗</a></div>
   </div>
@@ -819,6 +822,10 @@ const CAMPANA_ANALYTICS_TAG = 'campana';
 const CAMPANA_UMAMI_WEBSITE_ID = 'b2300e0b-bc69-49d7-ad05-06f980b5ed38';
 const CAMPANA_UMAMI_SCRIPT_URL = 'https://cloud.umami.is/script.js';
 const CAMPANA_ANALYTICS_SCHEMA = Object.freeze({
+  campana_play_requested: {
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
+    texture: ['tubular', 'church', 'bowl', 'crystal', 'bronze', 'handbell'],
+  },
   campana_audio_started: {
     preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
     texture: ['tubular', 'church', 'bowl', 'crystal', 'bronze', 'handbell'],
@@ -827,6 +834,8 @@ const CAMPANA_ANALYTICS_SCHEMA = Object.freeze({
   campana_audio_failed: {
     stage: ['initial', 'stream'],
     reason: ['network', 'server', 'decode', 'timeout', 'unknown'],
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
+    texture: ['tubular', 'church', 'bowl', 'crystal', 'bronze', 'handbell'],
   },
   campana_listening_reached: {
     preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
@@ -837,9 +846,16 @@ const CAMPANA_ANALYTICS_SCHEMA = Object.freeze({
     format: ['wav', 'flac', 'mp3'],
     duration: ['30s', '1m', '2m', '3m', '4m'],
   },
+  campana_export_started: {
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
+    format: ['wav', 'flac', 'mp3'],
+    duration: ['30s', '1m', '2m', '3m', '4m'],
+  },
   campana_export_failed: {
     stage: ['start', 'render', 'download'],
+    preset: ['sera', 'tempio', 'cristallo', 'cattedrale', 'deriva', 'notte', 'festa', 'aurora'],
     format: ['wav', 'flac', 'mp3'],
+    duration: ['30s', '1m', '2m', '3m', '4m'],
   },
 });
 
@@ -1292,11 +1308,11 @@ async function ensureAudio() {
   if (audioCtx.state !== 'running') await audioCtx.resume();
 }
 
-async function fetchChunk(beatOffset, beats) {
+async function fetchChunk(beatOffset, beats, params) {
   const resp = await fetch(apiUrl('/api/preview'), {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ ...getParams(), beat_offset: beatOffset, chunk_beats: beats }),
+    body:    JSON.stringify({ ...params, beat_offset: beatOffset, chunk_beats: beats }),
   });
   if (!resp.ok) {
     let detail = `Server error ${resp.status}`;
@@ -1313,8 +1329,7 @@ async function fetchChunk(beatOffset, beats) {
 // scheduleChunk: schedule buffer at startTime using musicBeats (not buffer.duration)
 // to compute the hand-off time. The reverb tail in the buffer keeps playing
 // naturally, overlapping with the next chunk for a continuous soundscape.
-function scheduleChunk(buffer, startTime, token, musicBeats, events = []) {
-  const bpm      = parseInt($('bpmSelect').value);
+function scheduleChunk(buffer, startTime, token, musicBeats, bpm, events = []) {
   const musicDur = musicBeats * 60.0 / bpm;
   const fade     = Math.min(CROSSFADE, musicDur * 0.1);
   const end      = startTime + buffer.duration;
@@ -1350,16 +1365,16 @@ function scheduleChunk(buffer, startTime, token, musicBeats, events = []) {
 // when its fetch resolves — no busy-wait. Web Audio handles future startTimes.
 // beat_offset is tracked client-side and passed directly to the server so
 // the sequence is always contiguous (no skipped beats from index arithmetic).
-async function streamLoop({buf: firstBuffer, events: firstEvents}, token) {
+async function streamLoop({buf: firstBuffer, events: firstEvents}, token, params, analyticsContext) {
   // Schedule first (short) buffer
   let schedEnd = audioCtx.currentTime + 0.05;
-  const s0 = scheduleChunk(firstBuffer, schedEnd, token, FIRST_BEATS, firstEvents);
+  const s0 = scheduleChunk(firstBuffer, schedEnd, token, FIRST_BEATS, params.bpm, firstEvents);
   schedEnd = s0.schedEnd;
 
   let nextBeat = FIRST_BEATS;
 
-  let p1 = fetchChunk(nextBeat,              CHUNK_BEATS);
-  let p2 = fetchChunk(nextBeat + CHUNK_BEATS, CHUNK_BEATS);
+  let p1 = fetchChunk(nextBeat,              CHUNK_BEATS, params);
+  let p2 = fetchChunk(nextBeat + CHUNK_BEATS, CHUNK_BEATS, params);
   nextBeat += CHUNK_BEATS * 2;
 
   while (isPlaying && token === playToken) {
@@ -1369,20 +1384,23 @@ async function streamLoop({buf: firstBuffer, events: firstEvents}, token) {
     } catch (e) {
       if (!isPlaying || token !== playToken) break;
       setStatus('Buffering…', 'loading');
-      try { chunk = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS); } catch (_) {}
+      try { chunk = await fetchChunk(nextBeat - CHUNK_BEATS * 2, CHUNK_BEATS, params); } catch (_) {}
       if (!chunk) {
-        trackUsage('campana_audio_failed', { stage: 'stream', reason: analyticsFailureReason(e) });
+        trackUsage('campana_audio_failed', {
+          stage: 'stream', reason: analyticsFailureReason(e),
+          preset: analyticsContext.preset, texture: analyticsContext.texture,
+        });
         await hardStop(); setStatus('Render error', ''); break;
       }
     }
     if (!isPlaying || token !== playToken) break;
 
-    const sched = scheduleChunk(chunk.buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token, CHUNK_BEATS, chunk.events);
+    const sched = scheduleChunk(chunk.buf, Math.max(audioCtx.currentTime + 0.05, schedEnd), token, CHUNK_BEATS, params.bpm, chunk.events);
     schedEnd = sched.schedEnd;
     setStatus('Playing', 'playing');
 
     p1 = p2;
-    p2 = fetchChunk(nextBeat, CHUNK_BEATS);
+    p2 = fetchChunk(nextBeat, CHUNK_BEATS, params);
     nextBeat += CHUNK_BEATS;
 
     await sleepUntil(schedEnd - 1.5, token);
@@ -1415,10 +1433,19 @@ async function stopPlayback() {
 
 async function startPlayback() {
   const playbackRequestedAt = performance.now();
+  const playbackParams = getParams();
+  const playbackAnalytics = Object.freeze({
+    preset: analyticsPreset(playbackParams.preset),
+    texture: playbackParams.texture,
+  });
+  trackUsage('campana_play_requested', playbackAnalytics);
   try {
     await ensureAudio();
   } catch (err) {
-    trackUsage('campana_audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
+    trackUsage('campana_audio_failed', {
+      stage: 'initial', reason: analyticsFailureReason(err),
+      preset: playbackAnalytics.preset, texture: playbackAnalytics.texture,
+    });
     await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
     return;
   }
@@ -1429,6 +1456,8 @@ async function startPlayback() {
     sessionSeed = Math.floor(Math.random() * 99999);
     $('seedVal').value = sessionSeed;
   }
+  playbackParams.seed_base = sessionSeed;
+  Object.freeze(playbackParams);
   const token = ++playToken; isPlaying = true; isDirty = false;
   const now = audioCtx.currentTime;
   masterGain.gain.cancelScheduledValues(now);
@@ -1437,23 +1466,28 @@ async function startPlayback() {
   updatePlayBtn();
   setStatus('Generating first chunk…', 'loading');
   try {
-    const first = await fetchChunk(0, FIRST_BEATS);
+    const first = await fetchChunk(0, FIRST_BEATS, playbackParams);
     if (token !== playToken) return;
     setStatus('Playing', 'playing');
-    const analyticsPresetId = analyticsPreset(selPreset);
-    streamLoop(first, token).catch(async err => {
+    streamLoop(first, token, playbackParams, playbackAnalytics).catch(async err => {
       if (token !== playToken) return;
-      trackUsage('campana_audio_failed', { stage: 'stream', reason: analyticsFailureReason(err) });
+      trackUsage('campana_audio_failed', {
+        stage: 'stream', reason: analyticsFailureReason(err),
+        preset: playbackAnalytics.preset, texture: playbackAnalytics.texture,
+      });
       await hardStop(); setStatus('Error: ' + err.message, '');
     });
     trackUsage('campana_audio_started', {
-      preset: analyticsPresetId,
-      texture: selTexture,
+      preset: playbackAnalytics.preset,
+      texture: playbackAnalytics.texture,
       latency: analyticsLatency(performance.now() - playbackRequestedAt),
     });
-    scheduleListeningMilestones(token, analyticsPresetId);
+    scheduleListeningMilestones(token, playbackAnalytics.preset);
   } catch (err) {
-    trackUsage('campana_audio_failed', { stage: 'initial', reason: analyticsFailureReason(err) });
+    trackUsage('campana_audio_failed', {
+      stage: 'initial', reason: analyticsFailureReason(err),
+      preset: playbackAnalytics.preset, texture: playbackAnalytics.texture,
+    });
     await hardStop(); isPlaying = false; setStatus('Error: ' + err.message, '');
   }
 }
@@ -1469,6 +1503,13 @@ async function togglePlay() {
 async function exportWav() {
   const minutes = exportDurMinutes || 1;
   const fmt     = exportFormat || 'wav';
+  const exportParams = Object.freeze(getParams());
+  const exportAnalytics = Object.freeze({
+    preset: analyticsPreset(exportParams.preset),
+    format: fmt,
+    duration: analyticsExportDuration(minutes),
+  });
+  trackUsage('campana_export_started', exportAnalytics);
   $('exportBtn').disabled = true;
   setStatus('Starting render…', 'loading');
   let exportStage = 'start';
@@ -1476,7 +1517,7 @@ async function exportWav() {
     // 1. Start background render job — returns immediately with job_id
     const startR = await fetch(apiUrl('/api/render'), {
       method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ ...getParams(), export_minutes: minutes, export_format: fmt }),
+      body: JSON.stringify({ ...exportParams, export_minutes: minutes, export_format: fmt }),
     });
     if (!startR.ok) {
       const txt = await startR.text().catch(() => startR.status);
@@ -1506,15 +1547,11 @@ async function exportWav() {
     if (!dlR.ok) throw new Error(`Download failed: ${dlR.status}`);
     const url = URL.createObjectURL(await dlR.blob());
     const a = document.createElement('a'); a.href = url;
-    a.download = selPreset + '.' + fmt; a.click(); URL.revokeObjectURL(url);
-    trackUsage('campana_export_completed', {
-      preset: analyticsPreset(selPreset),
-      format: fmt,
-      duration: analyticsExportDuration(minutes),
-    });
+    a.download = exportParams.preset + '.' + fmt; a.click(); URL.revokeObjectURL(url);
+    trackUsage('campana_export_completed', exportAnalytics);
     setStatus('Downloaded ✓', 'playing');
   } catch (e) {
-    trackUsage('campana_export_failed', { stage: exportStage, format: fmt });
+    trackUsage('campana_export_failed', { ...exportAnalytics, stage: exportStage });
     setStatus('Export error: ' + e.message, '');
   }
   $('exportBtn').disabled = false;

@@ -139,6 +139,10 @@ class SeoMetadataTests(unittest.TestCase):
                 )
                 self.assertEqual(len(personal_links), 2)
                 self.assertTrue(all("nofollow" not in link for link in personal_links))
+                self.assertIn(
+                    ".app-byline.creator-link {\n      color: var(--text);\n    }",
+                    html,
+                )
 
     def test_favicon_is_declared_and_deployed_in_both_apps(self):
         expected_links = (

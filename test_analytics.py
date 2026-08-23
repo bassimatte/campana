@@ -55,9 +55,11 @@ class AnalyticsTests(unittest.TestCase):
         self.assertIsNotNone(schema_match)
         schema = schema_match.group(1)
         for event in (
+            "campana_play_requested",
             "campana_audio_started",
             "campana_audio_failed",
             "campana_listening_reached",
+            "campana_export_started",
             "campana_export_completed",
             "campana_export_failed",
         ):
@@ -66,6 +68,42 @@ class AnalyticsTests(unittest.TestCase):
 
         self.assertIn("if (allowed.includes(value)) props[key] = value;", self.static_html)
         self.assertIn("window.umami.track(eventName, properties);", self.static_html)
+
+    def test_failures_include_safe_action_context(self):
+        audio_failed = re.search(
+            r"campana_audio_failed: \{(.*?)\n  \},",
+            self.static_html,
+            re.DOTALL,
+        ).group(1)
+        export_failed = re.search(
+            r"campana_export_failed: \{(.*?)\n  \},",
+            self.static_html,
+            re.DOTALL,
+        ).group(1)
+        for key in ("preset:", "texture:"):
+            self.assertIn(key, audio_failed)
+        for key in ("preset:", "format:", "duration:"):
+            self.assertIn(key, export_failed)
+
+    def test_playback_and_export_contexts_are_snapshotted(self):
+        self.assertIn("const playbackParams = getParams();", self.static_html)
+        self.assertIn("Object.freeze(playbackParams);", self.static_html)
+        self.assertIn(
+            "streamLoop(first, token, playbackParams, playbackAnalytics)",
+            self.static_html,
+        )
+        self.assertIn(
+            "JSON.stringify({ ...params, beat_offset: beatOffset, chunk_beats: beats })",
+            self.static_html,
+        )
+        self.assertNotIn(
+            "JSON.stringify({ ...getParams(), beat_offset: beatOffset", self.static_html
+        )
+        self.assertIn(
+            "const exportParams = Object.freeze(getParams());", self.static_html
+        )
+        self.assertIn("a.download = exportParams.preset", self.static_html)
+        self.assertNotIn("analyticsPreset(selPreset)", self.static_html)
 
     def test_public_festa_name_is_reported(self):
         self.assertIn("'festa'", self.static_html)
@@ -97,6 +135,7 @@ class AnalyticsTests(unittest.TestCase):
     def test_privacy_notice_is_visible(self):
         for html in (self.static_html, self.docs_html):
             self.assertIn("anonymous, aggregate usage statistics", html)
+            self.assertIn("playback and export attempts", html)
             self.assertIn("Analytics is disabled for local installations", html)
 
 
