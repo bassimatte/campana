@@ -6,6 +6,21 @@
   <title>Campana – Generative Bell Synthesizer &amp; Ambient Soundscapes</title>
   <meta name="description" content="Create endless, evolving bell soundscapes in your browser with Campana, a free generative synthesizer with customizable tones, spatial effects, and audio export." />
   <link rel="canonical" href="https://bassimatte.github.io/campana/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Campana" />
+  <meta property="og:title" content="Campana – Generative Bell Synthesizer" />
+  <meta property="og:description" content="Create endless, evolving bell soundscapes in your browser with a free generative synthesizer." />
+  <meta property="og:url" content="https://bassimatte.github.io/campana/" />
+  <meta property="og:image" content="https://bassimatte.github.io/campana/social-card.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="2400" />
+  <meta property="og:image:height" content="2400" />
+  <meta property="og:image:alt" content="Campana generative bell synthesizer artwork with concentric acoustic patterns" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Campana – Generative Bell Synthesizer" />
+  <meta name="twitter:description" content="Create endless, evolving bell soundscapes in your browser with a free generative synthesizer." />
+  <meta name="twitter:image" content="https://bassimatte.github.io/campana/social-card.png" />
+  <meta name="twitter:image:alt" content="Campana generative bell synthesizer artwork with concentric acoustic patterns" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -112,6 +127,15 @@
     .app-byline {
       font-size: 11px; font-weight: 400; letter-spacing: 0.04em;
       text-transform: none; color: var(--muted); margin-left: 7px;
+    }
+    .creator-link {
+      color: inherit;
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+    .creator-link:hover,
+    .creator-link:focus-visible {
+      color: var(--accent);
     }
     .hdr-right { display: flex; align-items: center; gap: 8px; }
     .status-dot {
@@ -442,7 +466,8 @@
   <div class="hdr">
     <div>
       <div class="brand-title">
-        <h1 class="app-name">Campana</h1><span class="app-byline">by Matteo Bassi</span>
+        <h1 class="app-name">Campana</h1>
+        <a class="app-byline creator-link" href="https://bassimatte.github.io/">by Matteo Bassi</a>
       </div>
       <p class="app-tagline">Generative bell synthesizer &amp; ambient soundscapes</p>
     </div>
@@ -768,7 +793,7 @@
       <h3>Privacy</h3>
       <p>The public Campana website uses <a href="https://umami.is/" target="_blank" rel="noopener" style="color:var(--accent)">Umami</a> for anonymous, aggregate usage statistics. It records successful playback, broad listening-duration milestones, and completed exports so the project can be improved. Campana does not send seeds, control values, filenames, audio, or exact error messages. Analytics is disabled for local installations, repository forks, and the Railway backend.</p>
     </div>
-    <div class="modal-foot">48 kHz · 16-bit stereo · generative · infinite<br>Created by <a href="https://freesound.org/people/bassimat/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Matteo Bassi</a></div>
+    <div class="modal-foot">48 kHz · 16-bit stereo · generative · infinite<br>Created by <a href="https://freesound.org/people/bassimat/" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">Matteo Bassi</a><br><a class="creator-link" href="https://bassimatte.github.io/#instruments">More tools by Matteo Bassi ↗</a></div>
   </div>
 </div>
 

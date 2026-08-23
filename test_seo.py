@@ -63,6 +63,69 @@ class SeoMetadataTests(unittest.TestCase):
                 self.assertEqual(data["url"], "https://bassimatte.github.io/campana/")
                 self.assertEqual(data["offers"]["price"], "0")
 
+    def test_open_graph_metadata_has_a_public_social_card(self):
+        expected = {
+            "og:type": "website",
+            "og:site_name": "Campana",
+            "og:title": "Campana – Generative Bell Synthesizer",
+            "og:url": "https://bassimatte.github.io/campana/",
+            "og:image": "https://bassimatte.github.io/campana/social-card.png",
+            "og:image:type": "image/png",
+            "og:image:width": "2400",
+            "og:image:height": "2400",
+        }
+        for path, html in self.targets.items():
+            with self.subTest(path=path):
+                metadata = dict(
+                    re.findall(
+                        r'<meta property="(og:[^"]+)" content="([^"]+)"\s*/>', html
+                    )
+                )
+                self.assertEqual({key: metadata.get(key) for key in expected}, expected)
+                self.assertTrue(metadata.get("og:description"))
+                self.assertTrue(metadata.get("og:image:alt"))
+
+    def test_twitter_metadata_matches_the_square_card(self):
+        expected_image = "https://bassimatte.github.io/campana/social-card.png"
+        for path, html in self.targets.items():
+            with self.subTest(path=path):
+                metadata = dict(
+                    re.findall(
+                        r'<meta name="(twitter:[^"]+)" content="([^"]+)"\s*/>', html
+                    )
+                )
+                self.assertEqual(metadata.get("twitter:card"), "summary")
+                self.assertEqual(metadata.get("twitter:image"), expected_image)
+                self.assertTrue(metadata.get("twitter:title"))
+                self.assertTrue(metadata.get("twitter:description"))
+                self.assertTrue(metadata.get("twitter:image:alt"))
+
+    def test_social_card_is_in_the_github_pages_output(self):
+        card = Path("docs/social-card.png")
+        self.assertTrue(card.is_file())
+        self.assertEqual(card.read_bytes()[:8], b"\x89PNG\r\n\x1a\n")
+
+    def test_creator_links_back_to_personal_site(self):
+        for path, html in self.targets.items():
+            with self.subTest(path=path):
+                self.assertIn(
+                    '<a class="app-byline creator-link" '
+                    'href="https://bassimatte.github.io/">by Matteo Bassi</a>',
+                    html,
+                )
+                self.assertIn(
+                    '<a class="creator-link" '
+                    'href="https://bassimatte.github.io/#instruments">'
+                    'More tools by Matteo Bassi ↗</a>',
+                    html,
+                )
+                personal_links = re.findall(
+                    r'<a[^>]+href="https://bassimatte\.github\.io/(?:#instruments)?"[^>]*>',
+                    html,
+                )
+                self.assertEqual(len(personal_links), 2)
+                self.assertTrue(all("nofollow" not in link for link in personal_links))
+
 
 if __name__ == "__main__":
     unittest.main()
