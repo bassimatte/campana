@@ -58,6 +58,25 @@ class SeoMetadataTests(unittest.TestCase):
                     "Generative bell synthesizer &amp; ambient soundscapes", html
                 )
 
+    def test_visible_about_section_explains_the_instrument(self):
+        for path, html in self.targets.items():
+            with self.subTest(path=path):
+                self.assertIn(
+                    '<section class="about-campana" '
+                    'aria-labelledby="about-campana-title">',
+                    html,
+                )
+                self.assertEqual(
+                    re.findall(r'<h2 id="about-campana-title">(.*?)</h2>', html),
+                    ["Eight bell worlds, continuously recomposed."],
+                )
+                for heading in (
+                    "What Campana creates",
+                    "How it works",
+                    "What you can use it for",
+                ):
+                    self.assertIn(f"<h3>{heading}</h3>", html)
+
     def test_structured_data_describes_a_free_web_application(self):
         for path, html in self.targets.items():
             with self.subTest(path=path):
@@ -147,7 +166,7 @@ class SeoMetadataTests(unittest.TestCase):
                     r'<a[^>]+href="https://bassimatte\.github\.io/(?:#instruments)?"[^>]*>',
                     html,
                 )
-                self.assertEqual(len(personal_links), 2)
+                self.assertEqual(len(personal_links), 3)
                 self.assertTrue(all("nofollow" not in link for link in personal_links))
                 self.assertIn(
                     ".app-byline.creator-link {\n      color: var(--text);\n    }",
