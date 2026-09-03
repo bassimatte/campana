@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -14,6 +15,19 @@ from engine.web_server import _parse_render_params
 
 
 class PresetIdentityTests(unittest.TestCase):
+    def test_every_preset_default_bpm_is_available_in_the_interface(self):
+        expected = {str(preset["default_bpm"]) for preset in PRESETS.values()}
+        for path in ("engine/static/index.html", "docs/index.html"):
+            html = Path(path).read_text(encoding="utf-8-sig")
+            select = re.search(
+                r'<select id="bpmSelect">(.*?)</select>', html, re.DOTALL
+            )
+            self.assertIsNotNone(select)
+            available = set(
+                re.findall(r'<option value="([^"]+)"', select.group(1))
+            )
+            self.assertEqual(expected - available, set(), path)
+
     def test_festa_is_canonical_and_giardino_is_only_an_alias(self):
         self.assertIn("festa", PRESETS)
         self.assertNotIn("giardino", PRESETS)

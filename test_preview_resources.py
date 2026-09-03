@@ -26,7 +26,17 @@ class _JsonRequest:
         }
 
 
+class _InvalidBpmRequest:
+    async def json(self):
+        return {"preset": "festa", "bpm": None, "chunk_beats": 6}
+
+
 class PreviewResourceTests(unittest.TestCase):
+    def test_invalid_preview_parameters_return_422(self):
+        response = asyncio.run(web_server.preview_audio(_InvalidBpmRequest()))
+        self.assertEqual(response.status_code, 422)
+        self.assertIn(b"invalid preview parameters", response.body)
+
     def test_preview_audio_workspaces_use_float32(self):
         tone = synth.bell_tone(
             220.0,

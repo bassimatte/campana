@@ -646,9 +646,15 @@ def list_keys():
 
 @app.post("/api/preview")
 async def preview_audio(request: Request):
-    body        = await request.json()
-    p           = _parse_render_params(body)
-    chunk_beats = float(body.get("chunk_beats", 12))
+    try:
+        body = await request.json()
+        p = _parse_render_params(body)
+        chunk_beats = float(body.get("chunk_beats", 12))
+    except (TypeError, ValueError):
+        logging.warning("invalid preview parameters", exc_info=True)
+        return JSONResponse(
+            {"detail": "invalid preview parameters"}, status_code=422
+        )
     try:
         # The browser prefetches two chunks. Serializing their synthesis keeps
         # the large bronze/handbell NumPy workspaces from overlapping while the
