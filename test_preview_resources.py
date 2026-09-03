@@ -7,7 +7,7 @@ from unittest import mock
 
 from fastapi.responses import Response
 
-from engine import web_server
+from engine import synth, web_server
 
 
 ROOT = Path(__file__).parent
@@ -27,6 +27,28 @@ class _JsonRequest:
 
 
 class PreviewResourceTests(unittest.TestCase):
+    def test_preview_audio_workspaces_use_float32(self):
+        tone = synth.bell_tone(
+            220.0,
+            0.1,
+            texture="handbell",
+            strike_level=0.42,
+            variation_seed=1,
+        )
+        self.assertEqual(tone.dtype.name, "float32")
+
+        audio = synth.render_chunk(
+            [(0.0, "C4", 0.1, 0.8)],
+            beat_offset=0,
+            chunk_beats=0.1,
+            total_beats=16,
+            bpm=120,
+            texture="handbell",
+            delay_wet=0.06,
+        )
+        self.assertEqual(audio.dtype.name, "float32")
+        self.assertTrue(synth.stereo_to_wav_bytes(audio).startswith(b"RIFF"))
+
     def test_preview_synthesis_is_serialized(self):
         active = 0
         max_active = 0

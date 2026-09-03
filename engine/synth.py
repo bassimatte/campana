@@ -149,8 +149,8 @@ def bell_tone(freq: float, duration: float, velocity: float = 1.0,
     seed = int(freq * 137) if variation_seed is None else int(variation_seed + freq * 137)
     rng = np.random.default_rng(abs(seed) % (2**31))
     n   = int(SAMPLE_RATE * duration)
-    t   = np.linspace(0, duration, n, endpoint=False)
-    sig = np.zeros(n, dtype=np.float64)
+    t   = np.linspace(0, duration, n, endpoint=False, dtype=np.float32)
+    sig = np.zeros(n, dtype=np.float32)
 
     # Perceptual velocity curve — soft notes feel softer, hard notes have more punch
     vel_eff = float(np.clip(velocity ** 0.65, 0.05, 1.0))
@@ -183,23 +183,24 @@ def bell_tone(freq: float, duration: float, velocity: float = 1.0,
     if effective_strike > 0.01:
         sig += _strike_transient(freq, n, effective_strike, rng)
     peak = np.max(np.abs(sig)) or 1.0
-    return sig / peak * vel_eff
+    sig *= vel_eff / peak
+    return sig
 
 
 def _strike_transient(freq: float, n: int, level: float,
                       rng: np.random.Generator) -> np.ndarray:
     """Short bandpass noise burst simulating the mallet/clapper impact."""
-    noise = rng.standard_normal(n)
+    noise = rng.standard_normal(n, dtype=np.float32)
     nyq   = SAMPLE_RATE / 2.0
     lo    = max(freq * 1.5, 300.0) / nyq
     hi    = min(freq * 6.0, 14000.0) / nyq
     if 0 < lo < hi < 0.99:
         try:
             sos   = sp_signal.butter(2, [lo, hi], 'bandpass', output='sos')
-            noise = sp_signal.sosfilt(sos, noise)
+            noise = sp_signal.sosfilt(sos.astype(np.float32), noise)
         except Exception:
             pass
-    t   = np.arange(n) / SAMPLE_RATE
+    t   = np.arange(n, dtype=np.float32) / SAMPLE_RATE
     env = np.exp(-t / 0.004)                      # 4 ms decay
     peak = np.max(np.abs(noise)) or 1.0
     return noise / peak * env * level * 0.25
@@ -250,8 +251,8 @@ def _fast_comb(x: np.ndarray, delay_ms: float, gain: float) -> np.ndarray:
     pad = (-n) % d
     xp  = np.pad(x, (0, pad))
     X   = xp.reshape(-1, d).T          # shape (d, n_blocks)
-    b   = np.array([1.0])
-    a   = np.array([1.0, -gain])
+    b   = np.array([1.0], dtype=x.dtype)
+    a   = np.array([1.0, -gain], dtype=x.dtype)
     for i in range(d):
         X[i] = sp_signal.lfilter(b, a, X[i])
     return X.T.reshape(-1)[:n]
@@ -264,8 +265,8 @@ def _fast_allpass(x: np.ndarray, delay_ms: float, gain: float = 0.5) -> np.ndarr
     pad = (-n) % d
     xp  = np.pad(x, (0, pad))
     X   = xp.reshape(-1, d).T
-    b   = np.array([-gain, 1.0])
-    a   = np.array([1.0, -gain])
+    b   = np.array([-gain, 1.0], dtype=x.dtype)
+    a   = np.array([1.0, -gain], dtype=x.dtype)
     for i in range(d):
         X[i] = sp_signal.lfilter(b, a, X[i])
     return X.T.reshape(-1)[:n]
@@ -284,14 +285,14 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
 
     def _channel(spread: float) -> np.ndarray:
         # Accumulate combs one at a time to avoid holding 8×45 MB simultaneously
-        rev = np.zeros(len(mono), dtype=np.float64)
+        rev = np.zeros(len(mono), dtype=mono.dtype)
         for d in _FV_COMB_MS:
             rev += _fast_comb(mono, d + spread, gain)
         rev *= (1.0 / len(_FV_COMB_MS))
         # Post-comb damping (one-pole LP approximates in-loop damping)
         if damping > 0.01:
-            lp_b = np.array([1.0 - damping])
-            lp_a = np.array([1.0, -damping])
+            lp_b = np.array([1.0 - damping], dtype=rev.dtype)
+            lp_a = np.array([1.0, -damping], dtype=rev.dtype)
             rev  = sp_signal.lfilter(lp_b, lp_a, rev)
         for ap in _FV_ALLPASS_MS:
             rev = _fast_allpass(rev, ap + spread * 0.25)
@@ -310,8 +311,8 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
         sh_l = sp_signal.resample_poly(rev_l, 1, 2)
         sh_r = sp_signal.resample_poly(rev_r, 1, 2)
         n_sh = min(len(sh_l), n)
-        buf_l = np.zeros(n); buf_l[:n_sh] = sh_l[:n_sh]
-        buf_r = np.zeros(n); buf_r[:n_sh] = sh_r[:n_sh]
+        buf_l = np.zeros(n, dtype=rev_l.dtype); buf_l[:n_sh] = sh_l[:n_sh]
+        buf_r = np.zeros(n, dtype=rev_r.dtype); buf_r[:n_sh] = sh_r[:n_sh]
         del sh_l, sh_r
         rev_l = rev_l + buf_l * (shimmer * 0.45)
         rev_r = rev_r + buf_r * (shimmer * 0.45)
@@ -323,7 +324,7 @@ def freeverb(stereo: np.ndarray, room_size: float = 0.5, damping: float = 0.4,
     n     = len(rev_l)
     dry   = 1.0 - wet
     w2    = width / 2.0
-    out   = np.empty((n, 2), dtype=np.float64)
+    out   = np.empty((n, 2), dtype=rev_l.dtype)
 
     # out[:,0] = (rev_l*(0.5+w2) + rev_r*(0.5-w2))*wet + stereo[:,0]*dry
     np.multiply(rev_l, 0.5 + w2, out=out[:, 0])
@@ -352,12 +353,12 @@ def apply_delay(stereo: np.ndarray, delay_ms: float = 300.0,
     if d >= len(stereo):
         return stereo
     n   = len(stereo)
-    out = stereo.astype(np.float64, copy=True)
+    out = stereo.copy()
     # Right channel offset for stereo ping-pong feel
     d_r = max(1, int(delay_ms * 0.97 * SAMPLE_RATE / 1000))
     delays = [d, d_r]
     fb = feedback * wet
-    layer = stereo.astype(np.float64)
+    layer = stereo.copy()
     for echo_n in range(16):                     # up to 16 echoes
         if fb < 0.0005:
             break
@@ -714,7 +715,7 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
 
     reverb_tail = 4.5 * max(decay_mult, 1.0)
     total_samp  = int((chunk_beats * beat_dur + reverb_tail) * SAMPLE_RATE) + SAMPLE_RATE
-    stereo      = np.zeros((total_samp, 2), dtype=np.float64)
+    stereo      = np.zeros((total_samp, 2), dtype=np.float32)
     rng         = np.random.default_rng(seed + 300)
     scatter_rng = np.random.default_rng(abs(seed + int(beat_offset * 100)))
 
@@ -775,15 +776,16 @@ def render_chunk(events: list, beat_offset: float, chunk_beats: float,
 
 
 def stereo_to_wav_bytes(audio: np.ndarray) -> bytes:
-    """Normalise and encode stereo float64 array to 16-bit WAV bytes."""
-    peak = np.max(np.abs(audio))
+    """Normalise and encode a stereo floating-point array to 16-bit WAV."""
+    peak = max(float(np.max(audio)), -float(np.min(audio)))
     if peak > 0:
-        audio = audio / peak * 0.85
-    pcm = (audio * 32767).astype(np.int16)
+        audio *= 0.85 / peak
+    audio *= 32767
+    pcm = audio.astype(np.int16)
     buf = io.BytesIO()
     with wave.open(buf, 'w') as wf:
         wf.setnchannels(2)
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
-        wf.writeframes(pcm.flatten(order='C').tobytes())
+        wf.writeframes(pcm.tobytes(order='C'))
     return buf.getvalue()
