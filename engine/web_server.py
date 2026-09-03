@@ -57,10 +57,14 @@ _RENDER_JOB_TTL_SECONDS = _positive_number_env("CAMPANA_RENDER_JOB_TTL", 600)
 _RENDER_CLEANUP_INTERVAL_SECONDS = _positive_number_env(
     "CAMPANA_RENDER_CLEANUP_INTERVAL", 30
 )
+_PREVIEW_MAX_CONCURRENT = int(
+    _positive_number_env("CAMPANA_PREVIEW_MAX_CONCURRENT", 1)
+)
 
 _render_jobs: dict = {}
 _render_jobs_lock = threading.RLock()
 _render_slots = threading.BoundedSemaphore(_RENDER_MAX_CONCURRENT)
+_preview_slots = threading.BoundedSemaphore(_PREVIEW_MAX_CONCURRENT)
 _render_tempdir = tempfile.TemporaryDirectory(prefix="campana-renders-")
 _RENDER_DIR = Path(_render_tempdir.name)
 
@@ -368,6 +372,20 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
                     headers={"X-Events": json.dumps(viz_evts)})
 
 
+def _do_preview_with_cleanup(p: dict, body: dict, chunk_beats: float):
+    """Render a preview and return unused NumPy heap pages when possible."""
+    try:
+        return _do_preview(p, body, chunk_beats)
+    finally:
+        _trim_allocator_memory()
+
+
+def _do_preview_serialized(p: dict, body: dict, chunk_beats: float):
+    """Queue preview work without allowing synthesis buffers to overlap."""
+    with _preview_slots:
+        return _do_preview_with_cleanup(p, body, chunk_beats)
+
+
 def _write_full_render(p: dict, buf) -> None:
     """Write an export to a binary file-like object in bounded-size chunks.
 
@@ -632,7 +650,12 @@ async def preview_audio(request: Request):
     p           = _parse_render_params(body)
     chunk_beats = float(body.get("chunk_beats", 12))
     try:
-        return await asyncio.to_thread(_do_preview, p, body, chunk_beats)
+        # The browser prefetches two chunks. Serializing their synthesis keeps
+        # the large bronze/handbell NumPy workspaces from overlapping while the
+        # requests themselves remain asynchronously queued.
+        return await asyncio.to_thread(
+            _do_preview_serialized, p, body, chunk_beats
+        )
     except Exception:
         tb = traceback.format_exc()
         logging.error("preview error:\n%s\nparams: %s", tb, p)

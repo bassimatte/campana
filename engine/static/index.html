@@ -1396,11 +1396,21 @@ async function ensureAudio() {
 }
 
 async function fetchChunk(beatOffset, beats, params) {
-  const resp = await fetch(apiUrl('/api/preview'), {
-    method:  'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ ...params, beat_offset: beatOffset, chunk_beats: beats }),
-  });
+  const body = JSON.stringify({ ...params, beat_offset: beatOffset, chunk_beats: beats });
+  let resp;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      resp = await fetch(apiUrl('/api/preview'), {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      break;
+    } catch (err) {
+      if (attempt === 2) throw err;
+      await sleep(attempt === 0 ? 700 : 1600);
+    }
+  }
   if (!resp.ok) {
     let detail = `Server error ${resp.status}`;
     try { const j = await resp.json(); detail = j.detail || detail; } catch(_) {}

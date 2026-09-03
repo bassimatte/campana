@@ -41,6 +41,7 @@ The defaults can be tuned with Railway environment variables:
 
 | Variable | Default | Purpose |
 |---|---:|---|
+| `CAMPANA_PREVIEW_MAX_CONCURRENT` | `1` | Maximum simultaneous preview syntheses |
 | `CAMPANA_RENDER_MAX_CONCURRENT` | `2` | Maximum simultaneous export renders |
 | `CAMPANA_RENDER_JOB_TTL` | `600` | Job and temporary-file lifetime in seconds |
 | `CAMPANA_RENDER_CLEANUP_INTERVAL` | `30` | Periodic cleanup interval in seconds |
