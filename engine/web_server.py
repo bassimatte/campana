@@ -12,9 +12,13 @@ import logging
 import os
 import struct
 import subprocess
+import sys
+import tempfile
 import threading
+import time
 import traceback
 import uuid
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 try:
@@ -22,6 +26,7 @@ try:
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
     from fastapi.staticfiles import StaticFiles
+    from starlette.background import BackgroundTask
     import uvicorn
 except ImportError:
     raise ImportError(
@@ -37,46 +42,208 @@ _STATIC_DIR = Path(__file__).resolve().parent / "static"
 _STATIC_DIR.mkdir(exist_ok=True)
 
 # ── Background render jobs (async export) ─────────────────────────────────────
-_render_jobs: dict = {}   # job_id → {status, data, fname, error, media_type}
-_JOBS_MAX = 20            # cap in-memory slots
+def _positive_number_env(name: str, default: float) -> float:
+    try:
+        return max(1.0, float(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
 
 
-def _convert_audio(wav_bytes: bytes, fmt: str) -> tuple:
-    """Convert WAV bytes to the requested format.
-    Returns (data: bytes, media_type: str, ext: str).
-    Falls back to WAV if dependencies are missing.
+_JOBS_MAX = int(_positive_number_env("CAMPANA_RENDER_JOBS_MAX", 20))
+_RENDER_MAX_CONCURRENT = int(
+    _positive_number_env("CAMPANA_RENDER_MAX_CONCURRENT", 2)
+)
+_RENDER_JOB_TTL_SECONDS = _positive_number_env("CAMPANA_RENDER_JOB_TTL", 600)
+_RENDER_CLEANUP_INTERVAL_SECONDS = _positive_number_env(
+    "CAMPANA_RENDER_CLEANUP_INTERVAL", 30
+)
+
+_render_jobs: dict = {}
+_render_jobs_lock = threading.RLock()
+_render_slots = threading.BoundedSemaphore(_RENDER_MAX_CONCURRENT)
+_render_tempdir = tempfile.TemporaryDirectory(prefix="campana-renders-")
+_RENDER_DIR = Path(_render_tempdir.name)
+
+
+def _delete_render_file(path) -> None:
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        logging.warning("could not delete render file %s", path, exc_info=True)
+
+
+def _trim_allocator_memory() -> None:
+    """Ask glibc to return unused heap pages after a large render."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import ctypes
+
+        malloc_trim = ctypes.CDLL(None).malloc_trim
+        malloc_trim.argtypes = [ctypes.c_size_t]
+        malloc_trim.restype = ctypes.c_int
+        malloc_trim(0)
+    except (AttributeError, OSError):
+        logging.debug("malloc_trim is not available on this platform")
+
+
+def _job_paths(job: dict) -> set[Path]:
+    return {
+        Path(path)
+        for path in (job.get("file_path"), job.get("work_path"))
+        if path
+    }
+
+
+def _cleanup_render_jobs(*, now=None, force: bool = False) -> int:
+    """Remove expired job records and their temporary files.
+
+    Pending jobs expire from their creation time so abandoned long-running work
+    cannot stay addressable forever. Terminal jobs expire from their most recent
+    poll/download access. A worker whose pending record has expired notices that
+    the record is gone and deletes any result it subsequently produces.
+    """
+    current = time.time() if now is None else now
+    removed: list[dict] = []
+    with _render_jobs_lock:
+        for job_id, job in list(_render_jobs.items()):
+            if job["status"] == "pending":
+                age = current - job["created_at"]
+            else:
+                age = current - job["last_accessed_at"]
+            if force or age >= _RENDER_JOB_TTL_SECONDS:
+                removed.append(_render_jobs.pop(job_id))
+
+    for job in removed:
+        for path in _job_paths(job):
+            _delete_render_file(path)
+    if removed:
+        logging.info("cleaned up %d expired Campana render job(s)", len(removed))
+        _trim_allocator_memory()
+    return len(removed)
+
+
+def _register_render_job(job_id: str) -> bool:
+    """Register a pending job, evicting the oldest terminal job if necessary."""
+    now = time.time()
+    evicted = None
+    with _render_jobs_lock:
+        if len(_render_jobs) >= _JOBS_MAX:
+            terminal = [
+                (candidate_id, job)
+                for candidate_id, job in _render_jobs.items()
+                if job["status"] != "pending"
+            ]
+            if not terminal:
+                return False
+            oldest_id, _ = min(
+                terminal, key=lambda item: item[1]["created_at"]
+            )
+            evicted = _render_jobs.pop(oldest_id)
+
+        _render_jobs[job_id] = {
+            "status": "pending",
+            "file_path": None,
+            "work_path": None,
+            "fname": None,
+            "media_type": "audio/wav",
+            "error": None,
+            "created_at": now,
+            "completed_at": None,
+            "last_accessed_at": now,
+        }
+
+    if evicted:
+        for path in _job_paths(evicted):
+            _delete_render_file(path)
+    return True
+
+
+async def _render_cleanup_loop() -> None:
+    while True:
+        await asyncio.sleep(_RENDER_CLEANUP_INTERVAL_SECONDS)
+        await asyncio.to_thread(_cleanup_render_jobs)
+
+
+@asynccontextmanager
+async def _app_lifespan(_app):
+    cleanup_task = asyncio.create_task(_render_cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await cleanup_task
+        await asyncio.to_thread(_cleanup_render_jobs, force=True)
+
+
+def _convert_audio_file(wav_path: Path, fmt: str) -> tuple:
+    """Convert a WAV file incrementally and return (path, media type, ext).
+
+    Conversion reads bounded blocks instead of loading the complete WAV and
+    encoded result into memory at the same time. Missing optional encoders fall
+    back to the already-rendered WAV file.
     """
     fmt = (fmt or "wav").lower().strip()
     if fmt == "wav":
-        return wav_bytes, "audio/wav", "wav"
+        return wav_path, "audio/wav", "wav"
     try:
         import soundfile as sf
-        buf_in = io.BytesIO(wav_bytes)
-        audio, sr = sf.read(buf_in, dtype="float32")  # (samples, channels)
-        if fmt == "flac":
-            buf_out = io.BytesIO()
-            sf.write(buf_out, audio, sr, format="FLAC", subtype="PCM_16")
-            return buf_out.getvalue(), "audio/flac", "flac"
-        if fmt == "mp3":
-            try:
-                import lameenc
-                audio_i16 = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16)
-                channels = audio_i16.shape[1] if audio_i16.ndim > 1 else 1
-                enc = lameenc.Encoder()
-                enc.set_bit_rate(320)
-                enc.set_in_sample_rate(sr)
-                enc.set_channels(channels)
-                enc.set_quality(2)
-                mp3 = enc.encode(audio_i16.flatten().tobytes()) + enc.flush()
-                return mp3, "audio/mpeg", "mp3"
-            except ImportError:
-                logging.warning("lameenc not installed — falling back to WAV")
-                return wav_bytes, "audio/wav", "wav"
     except ImportError:
         logging.warning("soundfile not installed — falling back to WAV")
-    return wav_bytes, "audio/wav", "wav"
+        return wav_path, "audio/wav", "wav"
 
-app = FastAPI(title="Bells Generator", version="1.0")
+    if fmt == "flac":
+        output_path = wav_path.with_suffix(".flac")
+        with sf.SoundFile(str(wav_path), "r") as source:
+            with sf.SoundFile(
+                str(output_path),
+                "w",
+                samplerate=source.samplerate,
+                channels=source.channels,
+                format="FLAC",
+                subtype="PCM_16",
+            ) as target:
+                while True:
+                    block = source.read(65_536, dtype="float32", always_2d=True)
+                    if not len(block):
+                        break
+                    target.write(block)
+        _delete_render_file(wav_path)
+        return output_path, "audio/flac", "flac"
+
+    if fmt == "mp3":
+        try:
+            import lameenc
+        except ImportError:
+            logging.warning("lameenc not installed — falling back to WAV")
+            return wav_path, "audio/wav", "wav"
+
+        output_path = wav_path.with_suffix(".mp3")
+        with sf.SoundFile(str(wav_path), "r") as source:
+            enc = lameenc.Encoder()
+            enc.set_bit_rate(320)
+            enc.set_in_sample_rate(source.samplerate)
+            enc.set_channels(source.channels)
+            enc.set_quality(2)
+            with output_path.open("wb") as target:
+                while True:
+                    block = source.read(65_536, dtype="float32", always_2d=True)
+                    if not len(block):
+                        break
+                    audio_i16 = (
+                        np.clip(block, -1.0, 1.0) * 32767
+                    ).astype(np.int16)
+                    target.write(enc.encode(audio_i16.flatten().tobytes()))
+                target.write(enc.flush())
+        _delete_render_file(wav_path)
+        return output_path, "audio/mpeg", "mp3"
+
+    return wav_path, "audio/wav", "wav"
+
+app = FastAPI(title="Bells Generator", version="1.0", lifespan=_app_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -201,10 +368,12 @@ def _do_preview(p: dict, body: dict, chunk_beats: float) -> bytes:
                     headers={"X-Events": json.dumps(viz_evts)})
 
 
-def _do_full_render(p: dict) -> bytes:
-    """Render export in 32-beat chunks so peak memory stays ~150 MB regardless
-    of duration.  The first chunk calibrates the amplitude scale; all subsequent
-    chunks use the same scale so level is consistent throughout the file."""
+def _write_full_render(p: dict, buf) -> None:
+    """Write an export to a binary file-like object in bounded-size chunks.
+
+    The first chunk calibrates the amplitude scale; all subsequent chunks use
+    the same scale so level is consistent throughout the file.
+    """
     from .synth import SAMPLE_RATE, render_chunk as _rc
 
     preset        = PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values()))
@@ -258,7 +427,6 @@ def _do_full_render(p: dict) -> bytes:
     CH, SW       = 2, 2       # stereo, 16-bit
     data_bytes   = total_frames * CH * SW
 
-    buf = io.BytesIO()
     # WAV header (44 bytes)
     buf.write(b"RIFF")
     buf.write(struct.pack("<I", 36 + data_bytes))
@@ -309,7 +477,91 @@ def _do_full_render(p: dict) -> bytes:
     if frames_left > 0:
         buf.write(b"\x00" * frames_left * CH * SW)
 
+def _do_full_render(p: dict) -> bytes:
+    """Compatibility wrapper used by the command-line renderer."""
+    buf = io.BytesIO()
+    _write_full_render(p, buf)
     return buf.getvalue()
+
+
+def _run_render_job(job_id: str, p: dict, fmt: str, name: str) -> None:
+    """Render one export to disk and publish only its temporary file path."""
+    wav_path = None
+    result_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w+b",
+            prefix=f"{job_id}-",
+            suffix=".wav",
+            dir=str(_RENDER_DIR),
+            delete=False,
+        ) as output:
+            wav_path = Path(output.name)
+            abandoned = False
+            with _render_jobs_lock:
+                job = _render_jobs.get(job_id)
+                if job is None:
+                    abandoned = True
+                else:
+                    job["work_path"] = str(wav_path)
+            if not abandoned:
+                _write_full_render(p, output)
+
+        if abandoned:
+            _delete_render_file(wav_path)
+            return
+
+        # The periodic cleanup may have expired this job while it rendered.
+        # Avoid spending more CPU and disk space converting an orphaned WAV.
+        with _render_jobs_lock:
+            if job_id not in _render_jobs:
+                _delete_render_file(wav_path)
+                return
+
+        result_path, media_type, ext = _convert_audio_file(wav_path, fmt)
+        completed_at = time.time()
+        with _render_jobs_lock:
+            job = _render_jobs.get(job_id)
+            if job is None:
+                _delete_render_file(result_path)
+                return
+            job.update(
+                file_path=str(result_path),
+                work_path=None,
+                fname=name.replace(" ", "_") + "." + ext,
+                media_type=media_type,
+                status="done",
+                completed_at=completed_at,
+                last_accessed_at=completed_at,
+            )
+    except Exception:
+        tb = traceback.format_exc()
+        logging.error("render job %s error:\n%s", job_id, tb)
+        completed_at = time.time()
+        with _render_jobs_lock:
+            job = _render_jobs.get(job_id)
+            if job is not None:
+                job.update(
+                    status="error",
+                    error=tb,
+                    work_path=None,
+                    completed_at=completed_at,
+                    last_accessed_at=completed_at,
+                )
+        for candidate in {
+            path
+            for path in (
+                wav_path,
+                result_path,
+                wav_path.with_suffix(".flac") if wav_path else None,
+                wav_path.with_suffix(".mp3") if wav_path else None,
+            )
+            if path
+        }:
+            _delete_render_file(candidate)
+    finally:
+        _render_slots.release()
+        _trim_allocator_memory()
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
@@ -390,6 +642,7 @@ async def preview_audio(request: Request):
 @app.post("/api/render")
 async def start_render(request: Request):
     """Start a background render job. Returns {job_id} immediately."""
+    _cleanup_render_jobs()
     body    = await request.json()
     p       = _parse_render_params(body)
     minutes = float(body.get("export_minutes", 5))
@@ -397,60 +650,72 @@ async def start_render(request: Request):
     p["export_beats"] = minutes * p["bpm"]   # convert user minutes → beats
     name    = (PRESETS.get(p["preset_id"]) or next(iter(PRESETS.values())))["name"]
 
+    if not _render_slots.acquire(blocking=False):
+        return JSONResponse(
+            {"detail": "render capacity reached; retry shortly"},
+            status_code=429,
+            headers={"Retry-After": "30"},
+        )
+
     job_id = uuid.uuid4().hex[:10]
-    # Evict oldest job if at capacity
-    if len(_render_jobs) >= _JOBS_MAX:
-        oldest = next(iter(_render_jobs))
-        del _render_jobs[oldest]
-    _render_jobs[job_id] = {"status": "pending", "data": None, "fname": None,
-                             "media_type": "audio/wav", "error": None}
+    if not _register_render_job(job_id):
+        _render_slots.release()
+        return JSONResponse(
+            {"detail": "render queue is full; retry shortly"},
+            status_code=429,
+            headers={"Retry-After": "30"},
+        )
 
-    def _run():
-        try:
-            wav = _do_full_render(p)
-            data, media_type, ext = _convert_audio(wav, fmt)
-            _render_jobs[job_id]["data"]       = data
-            _render_jobs[job_id]["fname"]      = name.replace(" ", "_") + "." + ext
-            _render_jobs[job_id]["media_type"] = media_type
-            _render_jobs[job_id]["status"]     = "done"
-        except Exception:
-            tb = traceback.format_exc()
-            logging.error("render job %s error:\n%s", job_id, tb)
-            _render_jobs[job_id]["error"]  = tb
-            _render_jobs[job_id]["status"] = "error"
-
-    threading.Thread(target=_run, daemon=True).start()
+    try:
+        threading.Thread(
+            target=_run_render_job,
+            args=(job_id, p, fmt, name),
+            daemon=True,
+        ).start()
+    except Exception:
+        with _render_jobs_lock:
+            _render_jobs.pop(job_id, None)
+        _render_slots.release()
+        raise
     return JSONResponse({"job_id": job_id})
 
 
 @app.get("/api/render/{job_id}")
 async def render_status(job_id: str):
     """Poll render job status: {status: pending|done|error, error?: str}"""
-    job = _render_jobs.get(job_id)
-    if not job:
-        return JSONResponse({"status": "not_found"}, status_code=404)
-    resp = {"status": job["status"]}
-    if job["status"] == "error":
-        resp["error"] = job.get("error", "unknown error")
+    with _render_jobs_lock:
+        job = _render_jobs.get(job_id)
+        if not job:
+            return JSONResponse({"status": "not_found"}, status_code=404)
+        job["last_accessed_at"] = time.time()
+        resp = {"status": job["status"]}
+        if job["status"] == "error":
+            resp["error"] = job.get("error", "unknown error")
     return JSONResponse(resp)
 
 
 @app.get("/api/render/{job_id}/file")
 async def download_render(job_id: str):
-    """Download the finished file. Cleans up the job after download."""
-    job = _render_jobs.get(job_id)
-    if not job:
-        return JSONResponse({"detail": "job not found"}, status_code=404)
-    if job["status"] != "done" or job["data"] is None:
-        return JSONResponse({"detail": "not ready"}, status_code=202)
-    data       = job.pop("data")
-    fname      = job["fname"]
-    media_type = job.get("media_type", "audio/wav")
-    del _render_jobs[job_id]
-    return Response(
-        content=data,
+    """Stream the finished file and delete it when transmission completes."""
+    with _render_jobs_lock:
+        job = _render_jobs.get(job_id)
+        if not job:
+            return JSONResponse({"detail": "job not found"}, status_code=404)
+        job["last_accessed_at"] = time.time()
+        if job["status"] != "done" or not job["file_path"]:
+            return JSONResponse({"detail": "not ready"}, status_code=202)
+        file_path = Path(job["file_path"])
+        fname = job["fname"]
+        media_type = job.get("media_type", "audio/wav")
+        _render_jobs.pop(job_id)
+
+    if not file_path.is_file():
+        return JSONResponse({"detail": "render file missing"}, status_code=404)
+    return FileResponse(
+        path=str(file_path),
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        background=BackgroundTask(_delete_render_file, file_path),
     )
 
 # ── Launch ────────────────────────────────────────────────────────────────────
